@@ -95,7 +95,7 @@ Examples:
     parser.add_argument(
         "--rwgt",
         action="store_true",
-        help="Do not preserve event weights in output files",
+        help="Use rwgt section if present in the input file",
     )
 
     args = parser.parse_args()

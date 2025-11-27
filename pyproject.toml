@@ -88,6 +88,7 @@ Homepage = "https://github.com/scikit-hep/pylhe"
 lhecheck = "pylhe.cli.lhecheck:main"
 lheinfo = "pylhe.cli.lheinfo:main"
 lhesplit = "pylhe.cli.lhesplit:main"
+lhemerge = "pylhe.cli.lhemerge:main"
 
 [tool.hatch.version]
 source = "vcs"
