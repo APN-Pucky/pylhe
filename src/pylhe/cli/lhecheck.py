@@ -7,233 +7,322 @@ momentum conservation for each event up to a specified precision.
 """
 
 import argparse
+import json
+import math
 import sys
-import traceback
 import warnings
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+
+import yaml  # type: ignore[import-untyped]
 
 import pylhe
+from pylhe.cli.util import dataclass_with_properties_to_dict
 
 
-def check_momentum_conservation(
-    particles: list[pylhe.LHEParticle],
-    absolute_threshold: float = 1e-6,
-    relative_threshold: float = 1e-6,
-) -> tuple[bool, dict[str, Any]]:
-    """
-    Check momentum conservation for a list of particles.
-
-    Args:
-        particles: List of particles in the event
-        absolute_threshold: Absolute tolerance for momentum conservation check
-        relative_threshold: Relative tolerance for momentum conservation check
-
-    Returns:
-        Tuple of (is_conserved, momentum_info) where momentum_info contains
-        initial and final momentum sums and differences
-    """
-    # Separate incoming and outgoing particles
-    incoming = [p for p in particles if p.status == -1]
-    outgoing = [p for p in particles if p.status == 1]
-
-    # Calculate initial 4-momentum
-    initial_px = sum(p.px for p in incoming)
-    initial_py = sum(p.py for p in incoming)
-    initial_pz = sum(p.pz for p in incoming)
-    initial_e = sum(p.e for p in incoming)
-
-    # Calculate final 4-momentum
-    final_px = sum(p.px for p in outgoing)
-    final_py = sum(p.py for p in outgoing)
-    final_pz = sum(p.pz for p in outgoing)
-    final_e = sum(p.e for p in outgoing)
-
-    # Calculate differences
-    dpx = abs(initial_px - final_px)
-    dpy = abs(initial_py - final_py)
-    dpz = abs(initial_pz - final_pz)
-    de = abs(initial_e - final_e)
-
-    # Calculate relative differences
-
-    pxs = [abs(i.px) for i in [*incoming, *outgoing]] + [
-        1e-12
-    ]  # Prevent division by zero
-    pys = [abs(i.py) for i in [*incoming, *outgoing]] + [
-        1e-12
-    ]  # Prevent division by zero
-    pzs = [abs(i.pz) for i in [*incoming, *outgoing]] + [
-        1e-12
-    ]  # Prevent division by zero
-    es = [abs(i.e) for i in [*incoming, *outgoing]] + [
-        1e-12
-    ]  # Prevent division by zero
-
-    rdpx = dpx / max(pxs)
-    rdpy = dpy / max(pys)
-    rdpz = dpz / max(pzs)
-    rde = de / max(es)
-
-    # Check conservation using both absolute and relative thresholds
-    def check_component(diff: float, rdiff: float) -> bool:
-        # Check absolute threshold
-        # Check relative threshold (relative to the larger of initial or final)
-        return diff < absolute_threshold or rdiff < relative_threshold
-
-    is_conserved = all(
-        [
-            check_component(dpx, rdpx),
-            check_component(dpy, rdpy),
-            check_component(dpz, rdpz),
-            check_component(de, rde),
-        ]
-    )
-
-    momentum_info = {
-        "initial": {
-            "px": initial_px,
-            "py": initial_py,
-            "pz": initial_pz,
-            "e": initial_e,
-        },
-        "final": {"px": final_px, "py": final_py, "pz": final_pz, "e": final_e},
-        "differences": {"dpx": dpx, "dpy": dpy, "dpz": dpz, "de": de},
-        "rel_differences": {"rdpx": rdpx, "rdpy": rdpy, "rdpz": rdpz, "rde": rde},
-        "incoming_count": len(incoming),
-        "outgoing_count": len(outgoing),
-    }
-
-    return is_conserved, momentum_info
+@dataclass
+class LHEMomentum:
+    px: float
+    py: float
+    pz: float
+    e: float
 
 
-def validate_lhe_file(
-    filepath: str,
-    absolute_threshold: float = 1e-6,
-    relative_threshold: float = 1e-6,
-    verbose: bool = False,
-) -> dict[str, Any]:
-    """
-    Validate an LHE file and check momentum conservation.
+@dataclass
+class LHECheckTotalMomentaViolations:
+    event_index: int
 
-    Args:
-        filepath: Path to the LHE file
-        absolute_threshold: Absolute tolerance for momentum conservation check
-        relative_threshold: Relative tolerance for momentum conservation check
-        verbose: Whether to print detailed information
+    incoming: list[LHEMomentum]
+    outgoing: list[LHEMomentum]
 
-    Returns:
-        Dictionary with validation results
-    """
-    results = {
-        "file": filepath,
-        "valid": False,
-        "loadable": False,
-        "event_count": 0,
-        "momentum_violations": 0,
-        "max_absolute_violation": 0.0,
-        "max_relative_violation": 0.0,
-        "errors": [],
-    }
+    @property
+    def total_incoming(self) -> LHEMomentum:
+        total_px = sum(p.px for p in self.incoming)
+        total_py = sum(p.py for p in self.incoming)
+        total_pz = sum(p.pz for p in self.incoming)
+        total_e = sum(p.e for p in self.incoming)
+        return LHEMomentum(px=total_px, py=total_py, pz=total_pz, e=total_e)
 
-    try:
-        # Try to load the LHE file
-        if verbose:
-            print(f"Loading {filepath}...")
+    @property
+    def total_outgoing(self) -> LHEMomentum:
+        total_px = sum(p.px for p in self.outgoing)
+        total_py = sum(p.py for p in self.outgoing)
+        total_pz = sum(p.pz for p in self.outgoing)
+        total_e = sum(p.e for p in self.outgoing)
+        return LHEMomentum(px=total_px, py=total_py, pz=total_pz, e=total_e)
 
-        lhefile = pylhe.LHEFile.fromfile(filepath)
-        results["loadable"] = True
-
-        if verbose:
-            print("✓ File loaded successfully")
-
-        # Check momentum conservation for each event
-        event_count = 0
-        momentum_violations = 0
-        max_absolute_violation = 0.0
-        max_relative_violation = 0.0
-
-        for event in lhefile.events:
-            event_count += 1
-
-            is_conserved, momentum_info = check_momentum_conservation(
-                event.particles, absolute_threshold, relative_threshold
-            )
-
-            if not is_conserved:
-                momentum_violations += 1
-                # Track maximum absolute violation
-                max_abs_diff = max(
-                    momentum_info["differences"]["dpx"],
-                    momentum_info["differences"]["dpy"],
-                    momentum_info["differences"]["dpz"],
-                    momentum_info["differences"]["de"],
-                )
-                max_absolute_violation = max(max_absolute_violation, max_abs_diff)
-
-                max_rel_diff = max(
-                    momentum_info["rel_differences"]["rdpx"],
-                    momentum_info["rel_differences"]["rdpy"],
-                    momentum_info["rel_differences"]["rdpz"],
-                    momentum_info["rel_differences"]["rde"],
-                )
-
-                max_relative_violation = max(max_relative_violation, max_rel_diff)
-
-                if verbose:
-                    print(f"✗ Event {event_count}: Momentum not conserved")
-                    print(
-                        f"  {'Component':<10} {'Initial':<12} {'Final':<12} {'Abs Diff':<12} {'Rel Diff':<12}"
-                    )
-                    print(
-                        f"  {'-' * 10:<10} {'-' * 12:<12} {'-' * 12:<12} {'-' * 12:<12} {'-' * 12:<12}"
-                    )
-
-                    initial = momentum_info["initial"]
-                    final = momentum_info["final"]
-                    diffs = momentum_info["differences"]
-                    rel_diffs = momentum_info["rel_differences"]
-
-                    components = [
-                        ("px", "px", "dpx", "rdpx"),
-                        ("py", "py", "dpy", "rdpy"),
-                        ("pz", "pz", "dpz", "rdpz"),
-                        ("e", "E", "de", "rde"),
-                    ]
-
-                    for comp_key, comp_name, diff_key, rel_diff_key in components:
-                        print(
-                            f"  {comp_name:<10} {initial[comp_key]:<12.4e} {final[comp_key]:<12.4e} {diffs[diff_key]:<12.4e} {rel_diffs[rel_diff_key]:<12.4e}"
-                        )
-
-        results.update(
-            {
-                "valid": momentum_violations == 0,
-                "event_count": event_count,
-                "momentum_violations": momentum_violations,
-                "max_absolute_violation": max_absolute_violation,
-                "max_relative_violation": max_relative_violation,
-            }
+    @property
+    def differences(self) -> LHEMomentum:
+        total_in = self.total_incoming
+        total_out = self.total_outgoing
+        return LHEMomentum(
+            px=abs(total_in.px - total_out.px),
+            py=abs(total_in.py - total_out.py),
+            pz=abs(total_in.pz - total_out.pz),
+            e=abs(total_in.e - total_out.e),
         )
 
-        if verbose:
-            print(f"\nSummary for {filepath}:")
-            print(f"  Total events: {event_count:,}")
-            print(f"  Momentum violations: {momentum_violations:,}")
-            if momentum_violations > 0:
-                print(f"  Maximum absolute violation: {max_absolute_violation:.2e}")
-                print(f"  Maximum relative violation: {max_relative_violation:.2e}")
-                print(f"  Absolute threshold: {absolute_threshold:.2e}")
-                print(f"  Relative threshold: {relative_threshold:.2e}")
+    @property
+    def rel_differences(self) -> LHEMomentum:
+        diff = self.differences
 
-    except Exception as e:
-        results["errors"] = str(e)
-        if verbose:
-            # show traceback in verbose mode
-            print(f"✗ Error loading {filepath}: {e}")
-            print(traceback.format_exc())
+        refpx = max(
+            [abs(p.px) for p in self.incoming + self.outgoing] + [1e-12]
+        )  # Prevent division by zero
+        refpy = max([abs(p.py) for p in self.incoming + self.outgoing] + [1e-12])
+        refpz = max([abs(p.pz) for p in self.incoming + self.outgoing] + [1e-12])
+        refe = max([abs(p.e) for p in self.incoming + self.outgoing] + [1e-12])
 
-    return results
+        return LHEMomentum(
+            px=diff.px / refpx,  # Prevent division by zero
+            py=diff.py / refpy,
+            pz=diff.pz / refpz,
+            e=diff.e / refe,
+        )
+
+    def is_violation(
+        self, absolute_threshold: float, relative_threshold: float
+    ) -> bool:
+        diffs = self.differences
+        rel_diffs = self.rel_differences
+        return (
+            not (diffs.px < absolute_threshold or rel_diffs.px < relative_threshold)
+            or not (diffs.py < absolute_threshold or rel_diffs.py < relative_threshold)
+            or not (diffs.pz < absolute_threshold or rel_diffs.pz < relative_threshold)
+            or not (diffs.e < absolute_threshold or rel_diffs.e < relative_threshold)
+        )
+
+    def __str__(self) -> str:
+        incoming = self.total_incoming
+        outgoing = self.total_outgoing
+        diffs = self.differences
+        rel_diffs = self.rel_differences
+
+        lines = []
+        lines.append(f"Event {self.event_index}:")
+        lines.append(
+            f"  {'Component':<10} {'Incoming':<12} {'Outgoing':<12} {'Abs Diff':<12} {'Rel Diff':<12}"
+        )
+        lines.append(
+            f"  {'-' * 10:<10} {'-' * 12:<12} {'-' * 12:<12} {'-' * 12:<12} {'-' * 12:<12}"
+        )
+
+        components = [
+            ("px", incoming.px, outgoing.px, diffs.px, rel_diffs.px),
+            ("py", incoming.py, outgoing.py, diffs.py, rel_diffs.py),
+            ("pz", incoming.pz, outgoing.pz, diffs.pz, rel_diffs.pz),
+            ("E", incoming.e, outgoing.e, diffs.e, rel_diffs.e),
+        ]
+
+        for comp, inc_val, out_val, diff_val, rel_diff_val in components:
+            lines.append(
+                f"  {comp:<10} {inc_val:<12.4e} {out_val:<12.4e} {diff_val:<12.4e} {rel_diff_val:<12.4e}"
+            )
+
+        return "\n".join(lines)
+
+
+@dataclass
+class LHECheckOnShellViolation:
+    event_index: int
+    particle_index: int
+
+    px: float
+    py: float
+    pz: float
+    e: float
+    m: float
+
+    @property
+    def p(self) -> float:
+        # TODO check fail on negative mass?!
+        return math.sqrt(abs(self.e**2 - (self.px**2 + self.py**2 + self.pz**2)))
+
+    @property
+    def difference(self) -> float:
+        return abs(self.p - self.m)
+
+    @property
+    def rel_difference(self) -> float:
+        return self.difference / max(
+            abs(self.m), abs(self.p), 1e-12
+        )  # Prevent division by zero
+
+    def is_violation(
+        self, absolute_threshold: float, relative_threshold: float
+    ) -> bool:
+        return not (
+            self.difference < absolute_threshold
+            or self.rel_difference < relative_threshold
+        )
+
+    def __str__(self) -> str:
+        lines = []
+        lines.append(f"Event {self.event_index}, Particle {self.particle_index}:")
+        lines.append(f"    px:  {self.px:>12.4e}")
+        lines.append(f"    py:  {self.py:>12.4e}")
+        lines.append(f"    pz:  {self.pz:>12.4e}")
+        lines.append(f"    e:   {self.e:>12.4e}")
+        lines.append(f"    |p|: {self.p:>12.4e}")
+        lines.append(f"    m:   {self.m:>12.4e}")
+        lines.append(
+            f"    ||p| - |m||: {self.difference:.4e} (rel: {self.rel_difference:.4e})"
+        )
+        return "\n".join(lines)
+
+
+@dataclass
+class LHECheck:
+    file: str
+    on_shell_violations: list[LHECheckOnShellViolation]
+    total_momentum_violations: list[LHECheckTotalMomentaViolations]
+
+    def __str__(self) -> str:
+        lines = []
+        lines.append("-" * 60)
+        lines.append(f"File: {self.file}")
+
+        num_onshell_violations = len(self.on_shell_violations)
+        num_momentum_violations = len(self.total_momentum_violations)
+
+        if num_onshell_violations == 0 and num_momentum_violations == 0:
+            lines.append("✓ All events pass validation")
+            return "\n".join(lines)
+
+        if num_onshell_violations > 0:
+            lines.append(f"✗ On-shell violations: {num_onshell_violations}")
+            for osviolation in self.on_shell_violations:
+                lines.append(f"  {osviolation!s}")
+
+        if num_momentum_violations > 0:
+            lines.append(f"✗ Total momentum violations: {num_momentum_violations}")
+            for violation in self.total_momentum_violations:
+                lines.append(str(violation))
+
+        return "\n".join(lines)
+
+
+def get_lhecheck(
+    filepath: str,
+    absolute_threshold: float,
+    relative_threshold: float,
+    check_momentum: bool = True,
+    check_onshell: bool = True,
+) -> LHECheck:
+    # Read LHE file
+    lhefile = pylhe.LHEFile.fromfile(filepath)
+    lhecheck = LHECheck(
+        file=filepath, on_shell_violations=[], total_momentum_violations=[]
+    )
+
+    for event_index, event in enumerate(lhefile.events, start=1):
+        particle_index = 0
+        lhe_check_total_momenta = LHECheckTotalMomentaViolations(
+            event_index=event_index,
+            incoming=[
+                LHEMomentum(
+                    px=particle.px, py=particle.py, pz=particle.pz, e=particle.e
+                )
+                for particle in event.particles
+                if particle.status == -1
+            ],  # Incoming
+            outgoing=[
+                LHEMomentum(
+                    px=particle.px, py=particle.py, pz=particle.pz, e=particle.e
+                )
+                for particle in event.particles
+                if particle.status == 1
+            ],  # Outgoing
+        )
+        if check_momentum and lhe_check_total_momenta.is_violation(
+            absolute_threshold, relative_threshold
+        ):
+            lhecheck.total_momentum_violations.append(lhe_check_total_momenta)
+
+        if check_onshell:
+            for particle in event.particles:
+                particle_index += 1
+                if particle.status in [-1, 1]:  # Incoming or outgoing particles
+                    lhe_check_onshell = LHECheckOnShellViolation(
+                        event_index=event_index,
+                        particle_index=particle_index,
+                        px=particle.px,
+                        py=particle.py,
+                        pz=particle.pz,
+                        e=particle.e,
+                        m=particle.m,
+                    )
+                    if lhe_check_onshell.is_violation(
+                        absolute_threshold, relative_threshold
+                    ):
+                        lhecheck.on_shell_violations.append(lhe_check_onshell)
+
+    return lhecheck
+
+
+@dataclass
+class LHECheckSummary:
+    files: list[LHECheck]
+
+    @property
+    def total_violations(self) -> int:
+        return sum(
+            len(lhecheck.on_shell_violations) + len(lhecheck.total_momentum_violations)
+            for lhecheck in self.files
+        )
+
+    @property
+    def total_files(self) -> int:
+        return len(self.files)
+
+    def __str__(self) -> str:
+        lines = []
+        for lhecheck in self.files:
+            lines.append(str(lhecheck))
+        lines.append("=" * 60)
+
+        lines.append(f"Files processed: {self.total_files}")
+        lines.append(f"Total violations: {self.total_violations:,}")
+        lines.append("=" * 60)
+
+        return "\n".join(lines)
+
+
+def get_lhechecksummary(
+    filepaths: list[str],
+    absolute_threshold: float,
+    relative_threshold: float,
+    check_momentum: bool = True,
+    check_onshell: bool = True,
+) -> LHECheckSummary:
+    lhechecks = []
+    for filepath in filepaths:
+        lhecheck = get_lhecheck(
+            filepath,
+            absolute_threshold,
+            relative_threshold,
+            check_momentum,
+            check_onshell,
+        )
+        lhechecks.append(lhecheck)
+    return LHECheckSummary(files=lhechecks)
+
+
+def print_lhecheck_summary(
+    lhecheck_summary: LHECheckSummary, format: str = "plain"
+) -> None:
+    """Print LHE check summary in the specified format."""
+    if format == "json":
+        print(json.dumps(dataclass_with_properties_to_dict(lhecheck_summary), indent=2))
+    elif format == "yaml":
+        print(
+            yaml.dump(
+                dataclass_with_properties_to_dict(lhecheck_summary),
+                default_flow_style=False,
+            )
+        )
+    else:
+        print(str(lhecheck_summary))
 
 
 def main() -> None:
@@ -247,6 +336,10 @@ Examples:
   lhecheck file.lhe -a 1e-8                # Check with higher absolute precision
   lhecheck file.lhe -r 1e-8                # Check with higher relative precision
   lhecheck *.lhe -v                        # Check multiple files with verbose output
+  lhecheck file.lhe --format=json          # Output results in JSON format
+  lhecheck file.lhe --format=yaml          # Output results in YAML format
+  lhecheck file.lhe --no-momentum          # Skip momentum conservation checks
+  lhecheck file.lhe --no-onshell           # Skip on-shell mass checks
   lhecheck file.lhe -a 1e-10 -r 1e-8 -v    # Custom thresholds with verbose output
         """,
     )
@@ -271,6 +364,22 @@ Examples:
         "--verbose",
         action="store_true",
         help="Print detailed information during validation",
+    )
+    parser.add_argument(
+        "--format",
+        choices=["plain", "json", "yaml"],
+        default="plain",
+        help="Output format (default: plain)",
+    )
+    parser.add_argument(
+        "--no-momentum",
+        action="store_true",
+        help="Skip total momentum conservation checks",
+    )
+    parser.add_argument(
+        "--no-onshell",
+        action="store_true",
+        help="Skip on-shell mass checks",
     )
 
     args = parser.parse_args()
@@ -299,59 +408,17 @@ Examples:
         print("Error: No valid files found", file=sys.stderr)
         sys.exit(1)
 
-    # Validate all files
-    all_valid = True
-    total_events = 0
-    total_violations = 0
-
-    for filepath in file_paths:
-        results = validate_lhe_file(
-            filepath, args.absolute, args.relative, args.verbose
-        )
-
-        if not results["loadable"]:
-            print(f"✗ {filepath}: Cannot load file")
-            print(f"  Error: {results['errors']}")
-            all_valid = False
-            continue
-
-        if not results["valid"]:
-            print(
-                f"✗ {filepath}: {results['momentum_violations']}/{results['event_count']} events violate momentum conservation"
-            )
-            print(
-                f"  Maximum absolute violation: {results['max_absolute_violation']:.2e}"
-            )
-            print(
-                f"  Maximum relative violation: {results['max_relative_violation']:.2e}"
-            )
-            print(
-                f"  Thresholds: absolute={args.absolute:.2e}, relative={args.relative:.2e}"
-            )
-            all_valid = False
-        else:
-            print(
-                f"✓ {filepath}: All {results['event_count']:,} events pass validation"
-            )
-
-        total_events += results["event_count"]
-        total_violations += results["momentum_violations"]
-
-        if args.verbose and len(file_paths) > 1:
-            print()  # Add spacing between files in verbose mode
-
-    # Print summary for multiple files
-    if len(file_paths) > 1:
-        print("\nOverall Summary:")
-        print(f"  Files processed: {len(file_paths)}")
-        print(f"  Total events: {total_events:,}")
-        print(f"  Total violations: {total_violations:,}")
-        print(
-            f"  Thresholds: absolute={args.absolute:.2e}, relative={args.relative:.2e}"
-        )
+    lhecheck_summary = get_lhechecksummary(
+        file_paths,
+        args.absolute,
+        args.relative,
+        check_momentum=not args.no_momentum,
+        check_onshell=not args.no_onshell,
+    )
+    print_lhecheck_summary(lhecheck_summary, format=args.format)
 
     # Exit with appropriate code
-    sys.exit(0 if all_valid else 1)
+    sys.exit(0 if lhecheck_summary.total_violations == 0 else 1)
 
 
 if __name__ == "__main__":
