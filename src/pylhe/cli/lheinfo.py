@@ -7,43 +7,17 @@ including number of events, process information, particle combinations, etc.
 """
 
 import argparse
-import inspect
 import json
 import sys
 import warnings
 from collections import Counter
-from collections.abc import Iterable
-from dataclasses import dataclass, fields, is_dataclass
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Union
 
 import yaml  # type: ignore[import-untyped]
 
 import pylhe
-
-
-def dataclass_with_properties_to_dict(obj: object) -> Union[object, dict[Any, Any]]:
-    """Custom serialization function of dataclasses including @property values."""
-    if is_dataclass(obj):
-        result = {}
-        # Include real dataclass fields
-        for f in fields(obj):
-            value = getattr(obj, f.name)
-            result[f.name] = dataclass_with_properties_to_dict(value)
-        # Include @property values
-        for name, _ in inspect.getmembers(type(obj), lambda m: isinstance(m, property)):
-            if name not in result:
-                try:
-                    value = getattr(obj, name)
-                    result[name] = dataclass_with_properties_to_dict(value)
-                except Exception:
-                    pass
-        return result
-    if isinstance(obj, (list, tuple, set)):
-        return type(obj)(dataclass_with_properties_to_dict(v) for v in obj)
-    if isinstance(obj, dict):
-        return {k: dataclass_with_properties_to_dict(v) for k, v in obj.items()}
-    return obj
+from pylhe.cli.util import dataclass_with_properties_to_dict
 
 
 @dataclass
@@ -87,6 +61,47 @@ class LHEInfo:
             if self.num_events > 0
             else 0.0
         )
+
+    def __str__(self) -> str:
+        lines = []
+        lines.append("-" * 60)
+        lines.append(f"File: {self.filepath}")
+
+        # Beam information
+        lines.append(f"Beam A: {self.beamA} @ {self.energyA} GeV")
+        lines.append(f"Beam B: {self.beamB} @ {self.energyB} GeV")
+        ## Weight groups
+        # weight_groups = self.weight_groups
+        # if weight_groups:
+        #    lines.append("  Weight Groups:")
+        #    for name, count in weight_groups.items():
+        #        lines.append(f"    {name}: {count} weights")
+        # Number of events
+        lines.append(
+            f"Number of events: {self.num_events} (negative: {self.negative_weighted_events_ratio:.2%})"
+        )
+
+        # Process information
+        processes = self.process_info
+        if processes:
+            for _, proc in enumerate(processes):
+                lines.append(
+                    f"Process {proc.procId} cross-section: ({proc.xSection:.3e} +- {proc.error:.3e}) pb"
+                )
+
+                channels = proc.channels
+                if channels:
+                    # Sort channels by num_events in descending order
+                    sorted_channels = sorted(
+                        channels, key=lambda ch: ch.num_events, reverse=True
+                    )
+                    for _, channel in enumerate(sorted_channels):
+                        percentage = 100 * channel.num_events / self.num_events
+                        lines.append(
+                            f"  {channel.incoming_pdgid} -> {channel.outgoing_pdgid}: {channel.num_events:,} events ({percentage:.1f}%)"
+                        )
+
+        return "\n".join(lines)
 
 
 def get_lheinfo(filepath: str) -> LHEInfo:
@@ -158,102 +173,6 @@ def get_lheinfo(filepath: str) -> LHEInfo:
     )
 
 
-def print_lheinfo(lheinfo: LHEInfo, format: str = "plain") -> None:
-    """Analyze a single LHE file and return summary information."""
-    if format == "json":
-        print(json.dumps(dataclass_with_properties_to_dict(lheinfo), indent=2))
-    elif format == "yaml":
-        print(
-            yaml.dump(
-                dataclass_with_properties_to_dict(lheinfo), default_flow_style=False
-            )
-        )
-    else:
-        print("-" * 60)
-        print(f"File: {lheinfo.filepath}")
-
-        # Beam information
-        print(f"Beam A: {lheinfo.beamA} @ {lheinfo.energyA} GeV")
-        print(f"Beam B: {lheinfo.beamB} @ {lheinfo.energyB} GeV")
-        ## Weight groups
-        # weight_groups = lheinfo.weight_groups
-        # if weight_groups:
-        #    print("  Weight Groups:")
-        #    for name, count in weight_groups.items():
-        #        print(f"    {name}: {count} weights")
-        # Number of events
-        print(
-            f"Number of events: {lheinfo.num_events} (negative: {lheinfo.negative_weighted_events_ratio:.2%})"
-        )
-
-        # Process information
-        processes = lheinfo.process_info
-        if processes:
-            for _, proc in enumerate(processes):
-                print(
-                    f"Process {proc.procId} cross-section: ({proc.xSection:.3e} +- {proc.error:.3e}) pb"
-                )
-
-                channels = proc.channels
-                if channels:
-                    # Sort channels by num_events in descending order
-                    sorted_channels = sorted(
-                        channels, key=lambda ch: ch.num_events, reverse=True
-                    )
-                    for _, channel in enumerate(sorted_channels):
-                        percentage = 100 * channel.num_events / lheinfo.num_events
-                        print(
-                            f"  {channel.incoming_pdgid} -> {channel.outgoing_pdgid}: {channel.num_events:,} events ({percentage:.1f}%)"
-                        )
-
-
-@dataclass
-class LHEInfos:
-    """Merged information from multiple LHE files."""
-
-    num_events: int
-    negative_weighted_events: int
-
-    @property
-    def negative_weighted_events_ratio(self) -> float:
-        """Ratio of negative weighted events to total events."""
-        return (
-            self.negative_weighted_events / self.num_events
-            if self.num_events > 0
-            else 0.0
-        )
-
-
-def get_lheinfos(lheinfos: Iterable[LHEInfo]) -> LHEInfos:
-    total_events = 0
-    total_negative_weighted_events = 0
-    for lheinfo in lheinfos:
-        total_events += lheinfo.num_events
-        total_negative_weighted_events += lheinfo.negative_weighted_events
-    return LHEInfos(
-        num_events=total_events,
-        negative_weighted_events=total_negative_weighted_events,
-    )
-
-
-def print_lheinfos(lheinfos: LHEInfos, format: str = "plain") -> None:
-    """Print summary information from multiple LHE files."""
-    if format == "json":
-        print(json.dumps(dataclass_with_properties_to_dict(lheinfos), indent=2))
-    elif format == "yaml":
-        print(
-            yaml.dump(
-                dataclass_with_properties_to_dict(lheinfos), default_flow_style=False
-            )
-        )
-    else:
-        print("=" * 60)
-        print(
-            f"Total number of events: {lheinfos.num_events} (negative: {lheinfos.negative_weighted_events_ratio:.2%})"
-        )
-        print("=" * 60)
-
-
 @dataclass
 class LHESummary:
     """Summary information from multiple LHE files."""
@@ -261,8 +180,38 @@ class LHESummary:
     files: list[LHEInfo]
 
     @property
-    def summary(self) -> LHEInfos:
-        return get_lheinfos(self.files)
+    def total_events(self) -> int:
+        total_events = 0
+        for lheinfo in self.files:
+            total_events += lheinfo.num_events
+        return total_events
+
+    @property
+    def total_negative_weighted_events(self) -> int:
+        total_negative_weighted_events = 0
+        for lheinfo in self.files:
+            total_negative_weighted_events += lheinfo.negative_weighted_events
+        return total_negative_weighted_events
+
+    @property
+    def negative_weighted_events_ratio(self) -> float:
+        """Ratio of negative weighted events to total events."""
+        return (
+            self.total_negative_weighted_events / self.total_events
+            if self.total_events > 0
+            else 0.0
+        )
+
+    def __str__(self) -> str:
+        lines = []
+        for lheinfo in self.files:
+            lines.append(str(lheinfo))
+        lines.append("=" * 60)
+        lines.append(
+            f"Total number of events: {self.total_events} (negative: {self.negative_weighted_events_ratio:.2%})"
+        )
+        lines.append("=" * 60)
+        return "\n".join(lines)
 
 
 def get_lhesummary(file_paths: list[str]) -> LHESummary:
@@ -273,22 +222,6 @@ def get_lhesummary(file_paths: list[str]) -> LHESummary:
         lheinfos.append(lheinfo)
 
     return LHESummary(files=lheinfos)
-
-
-def print_lhesummary(lhesummary: LHESummary, format: str = "plain") -> None:
-    """Print summary information from multiple LHE files."""
-    if format == "json":
-        print(json.dumps(dataclass_with_properties_to_dict(lhesummary), indent=2))
-    elif format == "yaml":
-        print(
-            yaml.dump(
-                dataclass_with_properties_to_dict(lhesummary), default_flow_style=False
-            )
-        )
-    else:
-        for lheinfo in lhesummary.files:
-            print_lheinfo(lheinfo, format="plain")
-        print_lheinfos(lhesummary.summary, format="plain")
 
 
 def main() -> None:
@@ -330,7 +263,22 @@ Examples:
         sys.exit(1)
 
     summary = get_lhesummary(file_paths)
-    print_lhesummary(summary, format=args.format)
+    if args.format == "json":
+        print(
+            json.dumps(
+                dataclass_with_properties_to_dict(summary),
+                indent=2,
+            )
+        )
+    elif args.format == "yaml":
+        print(
+            yaml.dump(
+                dataclass_with_properties_to_dict(summary),
+                sort_keys=False,
+            )
+        )
+    else:
+        print(str(summary))
 
 
 if __name__ == "__main__":
