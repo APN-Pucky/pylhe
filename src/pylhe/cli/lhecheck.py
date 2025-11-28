@@ -165,18 +165,58 @@ class LHECheckOnShellViolation:
 
 
 @dataclass
+class LHECheckPositiveMassViolation:
+    px: float
+    py: float
+    pz: float
+    e: float
+
+    @property
+    def p2(self) -> float:
+        return self.px**2 + self.py**2 + self.pz**2
+
+    @property
+    def e2(self) -> float:
+        return self.e**2
+
+    @property
+    def m2(self) -> float:
+        return self.e2 - self.p2
+
+    def is_violation(self) -> bool:
+        return self.p2 > self.e2
+
+    def __str__(self) -> str:
+        lines = []
+        lines.append("✗ Positive mass violation:")
+        lines.append(f"    px:  {self.px:>12.4e}")
+        lines.append(f"    py:  {self.py:>12.4e}")
+        lines.append(f"    pz:  {self.pz:>12.4e}")
+        lines.append(f"    e:   {self.e:>12.4e}")
+        lines.append(f"    p²:  {self.p2:>12.4e}")
+        lines.append(f"    e²:  {self.e2:>12.4e}")
+        lines.append(f"    m²:  {self.m2:>12.4e} (negative - unphysical)")
+        return "\n".join(lines)
+
+
+@dataclass
 class LHECheckParticleViolation:
     particle_index: int
-    on_shell_violations: LHECheckOnShellViolation
+    on_shell_violations: Optional[LHECheckOnShellViolation]
+    positive_mass_violation: Optional[LHECheckPositiveMassViolation]
 
     @property
     def total_violations(self) -> int:
-        return 1
+        return sum(
+            v is not None
+            for v in [self.on_shell_violations, self.positive_mass_violation]
+        )
 
     def __str__(self) -> str:
         lines = []
         lines.append(f"✗ Particle {self.particle_index} violations:")
         lines.append(f"{self.on_shell_violations!s}")
+        lines.append(f"{self.positive_mass_violation!s}")
         return "\n".join(lines)
 
 
@@ -228,8 +268,9 @@ def get_lhecheck(
     filepath_or_fileobj: Union[str, TextIO],
     absolute_threshold: float,
     relative_threshold: float,
-    check_momentum: bool = True,
-    check_onshell: bool = True,
+    check_momentum: bool,
+    check_mass: bool,
+    check_onshell: bool,
 ) -> LHECheck:
     # Read LHE file
     if isinstance(filepath_or_fileobj, str):
@@ -271,25 +312,35 @@ def get_lhecheck(
         ):
             lhecheck_event.total_momentum_violations = lhe_check_total_momenta
 
-        if check_onshell:
-            for particle_index, particle in enumerate(event.particles, start=1):
-                if particle.status in [-1, 1]:  # Incoming or outgoing particles
-                    lhe_check_onshell = LHECheckOnShellViolation(
-                        px=particle.px,
-                        py=particle.py,
-                        pz=particle.pz,
-                        e=particle.e,
-                        m=particle.m,
-                    )
-                    if lhe_check_onshell.is_violation(
-                        absolute_threshold, relative_threshold
-                    ):
-                        lhecheck_event.particle_violations.append(
-                            LHECheckParticleViolation(
-                                particle_index=particle_index,
-                                on_shell_violations=lhe_check_onshell,
-                            )
-                        )
+        for particle_index, particle in enumerate(event.particles, start=1):
+            lhe_particle_check = LHECheckParticleViolation(
+                particle_index=particle_index,
+                on_shell_violations=None,
+                positive_mass_violation=None,
+            )
+            if check_mass:
+                lhe_check_mass = LHECheckPositiveMassViolation(
+                    px=particle.px, py=particle.py, pz=particle.pz, e=particle.e
+                )
+                if lhe_check_mass.is_violation():
+                    lhe_particle_check.positive_mass_violation = lhe_check_mass
+            if check_onshell and particle.status in [
+                -1,
+                1,
+            ]:  # Incoming or outgoing particles
+                lhe_check_onshell = LHECheckOnShellViolation(
+                    px=particle.px,
+                    py=particle.py,
+                    pz=particle.pz,
+                    e=particle.e,
+                    m=particle.m,
+                )
+                if lhe_check_onshell.is_violation(
+                    absolute_threshold, relative_threshold
+                ):
+                    lhe_particle_check.on_shell_violations = lhe_check_onshell
+            if lhe_particle_check.total_violations > 0:
+                lhecheck_event.particle_violations.append(lhe_particle_check)
         if lhecheck_event.total_violations > 0:
             lhecheck.check_events.append(lhecheck_event)
 
@@ -325,8 +376,9 @@ def get_lhechecksummary(
     filepaths_or_fileobjs: list[Union[str, TextIO]],
     absolute_threshold: float,
     relative_threshold: float,
-    check_momentum: bool = True,
-    check_onshell: bool = True,
+    check_momentum: bool,
+    check_mass: bool,
+    check_onshell: bool,
 ) -> LHECheckSummary:
     lhechecks = []
     for filepath_or_fileobj in filepaths_or_fileobjs:
@@ -335,6 +387,7 @@ def get_lhechecksummary(
             absolute_threshold,
             relative_threshold,
             check_momentum,
+            check_mass,
             check_onshell,
         )
         lhechecks.append(lhecheck)
@@ -421,6 +474,12 @@ Examples:
         help="Skip on-shell mass checks",
     )
 
+    parser.add_argument(
+        "--no-mass",
+        action="store_true",
+        help="Skip positive mass checks",
+    )
+
     args = parser.parse_args()
 
     # Validate threshold arguments
@@ -462,6 +521,7 @@ Examples:
         args.absolute,
         args.relative,
         check_momentum=not args.no_momentum,
+        check_mass=not args.no_mass,
         check_onshell=not args.no_onshell,
     )
     print_lhecheck_summary(lhecheck_summary, format=args.format)
