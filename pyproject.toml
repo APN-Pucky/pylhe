@@ -89,6 +89,7 @@ lhecheck = "pylhe.cli.lhecheck:main"
 lheinfo = "pylhe.cli.lheinfo:main"
 lhesplit = "pylhe.cli.lhesplit:main"
 lhemerge = "pylhe.cli.lhemerge:main"
+lhestack = "pylhe.cli.lhestack:main"
 lheunstack = "pylhe.cli.lheunstack:main"
 
 [tool.hatch.version]

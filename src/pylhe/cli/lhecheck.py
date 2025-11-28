@@ -215,6 +215,7 @@ def get_lhecheck(
         file=filepath, on_shell_violations=[], total_momentum_violations=[]
     )
 
+    # APN TODO this should be generator yield as well and only evaluate as it prints in case of very large files
     for event_index, event in enumerate(lhefile.events, start=1):
         particle_index = 0
         lhe_check_total_momenta = LHECheckTotalMomentaViolations(
