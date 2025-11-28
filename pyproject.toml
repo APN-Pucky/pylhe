@@ -87,6 +87,7 @@ Homepage = "https://github.com/scikit-hep/pylhe"
 [project.scripts]
 lhecheck = "pylhe.cli.lhecheck:main"
 lheinfo = "pylhe.cli.lheinfo:main"
+lheshow = "pylhe.cli.lheshow:main"
 lhesplit = "pylhe.cli.lhesplit:main"
 lhemerge = "pylhe.cli.lhemerge:main"
 lhestack = "pylhe.cli.lhestack:main"
