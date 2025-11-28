@@ -67,17 +67,36 @@ def matches_particle_filter(
 
 def matches_event_filter(
     event_index: int,
-    include_event_ranges: Optional[set[int]],
-    exclude_event_ranges: Optional[set[int]],
+    include_event_ranges: Optional[list[tuple[int, int]]],
+    exclude_event_ranges: Optional[list[tuple[int, int]]],
 ) -> bool:
     """Check if event matches event number filters."""
     # event_index is 0-based, but user input is 1-based
     event_number = event_index + 1
 
-    if include_event_ranges is not None and event_number not in include_event_ranges:
-        return False
-    if exclude_event_ranges is not None and event_number in exclude_event_ranges:
-        return False
+    # Check include ranges
+    if include_event_ranges is not None:
+        matches_include = False
+        for start, end in include_event_ranges:
+            if end == -1:  # Open upper bound
+                if event_number >= start:
+                    matches_include = True
+                    break
+            elif start <= event_number <= end:
+                matches_include = True
+                break
+        if not matches_include:
+            return False
+
+    # Check exclude ranges
+    if exclude_event_ranges is not None:
+        for start, end in exclude_event_ranges:
+            if end == -1:  # Open upper bound
+                if event_number >= start:
+                    return False
+            elif start <= event_number <= end:
+                return False
+
     return True
 
 
@@ -92,8 +111,8 @@ def filter_lhe_file(
     exclude_incoming_pdgids: Optional[set[int]] = None,
     outgoing_pdgids: Optional[set[int]] = None,
     exclude_outgoing_pdgids: Optional[set[int]] = None,
-    include_event_ranges: Optional[set[int]] = None,
-    exclude_event_ranges: Optional[set[int]] = None,
+    include_event_ranges: Optional[list[tuple[int, int]]] = None,
+    exclude_event_ranges: Optional[list[tuple[int, int]]] = None,
 ) -> None:
     """Filter an LHE file based on the given criteria."""
     try:
@@ -146,17 +165,19 @@ def parse_int_list(value: str) -> set[int]:
         raise argparse.ArgumentTypeError(err) from e
 
 
-def parse_range_list(value: str) -> set[int]:
+def parse_range_list(value: str) -> list[tuple[int, int]]:
     """Parse comma-separated list of integers and ranges.
 
+    Returns list of (start, end) tuples where -1 indicates open bound.
+
     Supports:
-    - Individual numbers: 5
-    - Ranges: 5-10 (inclusive)
-    - Lower bound: 5- (from 5 to end)
-    - Upper bound: -10 (from start to 10)
-    - Mixed: 1,5-10,15-,20,-25
+    - Individual numbers: 5 -> [(5, 5)]
+    - Ranges: 5-10 -> [(5, 10)] (inclusive)
+    - Lower bound: 5- -> [(5, -1)] (from 5 to end)
+    - Upper bound: -10 -> [(1, 10)] (from start to 10)
+    - Mixed: 1,5-10,15-,20,-25 -> [(1, 1), (5, 10), (15, -1), (20, 20), (1, 25)]
     """
-    result = set()
+    result = []
 
     try:
         for vitem in value.split(","):
@@ -164,16 +185,16 @@ def parse_range_list(value: str) -> set[int]:
 
             if "-" not in item:
                 # Single number
-                result.add(int(item))
+                num = int(item)
+                result.append((num, num))
             elif item.startswith("-"):
                 # Upper bound: -N
                 upper = int(item[1:])
-                result.update(range(1, upper + 1))
+                result.append((1, upper))
             elif item.endswith("-"):
-                # Lower bound: N-
+                # Lower bound: N- (open range)
                 lower = int(item[:-1])
-                # Use a reasonable upper limit for open ranges
-                result.update(range(lower, 1000000))
+                result.append((lower, -1))  # -1 indicates open upper bound
             else:
                 # Range: N-M
                 parts = item.split("-")
@@ -182,7 +203,7 @@ def parse_range_list(value: str) -> set[int]:
                     if lower > upper:
                         err = f"Invalid range: {item} (start > end)"
                         raise ValueError(err)
-                    result.update(range(lower, upper + 1))
+                    result.append((lower, upper))
                 else:
                     err = f"Invalid range format: {item}"
                     raise ValueError(err)
@@ -221,12 +242,13 @@ Particle PDG ID filters:
 
 Event filters:
   --events RANGE[,RANGE...] Include events in these ranges (1-indexed)
-                            Supports: N (single), N-M (range), N- (from N), -M (up to M)
+                            Supports: N (single), N-M (range), N- (from N to end), -M (up to M)
   --EVENTS RANGE[,RANGE...] Exclude events in these ranges (1-indexed)
-                            Supports: N (single), N-M (range), N- (from N), -M (up to M)
+                            Supports: N (single), N-M (range), N- (from N to end), -M (up to M)
 
 Note: Multiple filters are combined with AND logic.
       PDG ID 0 can be used as wildcard for any particle.
+      Open ranges (N-) use -1 internally to represent no upper bound.
         """,
     )
 
