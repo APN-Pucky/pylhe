@@ -71,11 +71,10 @@ class LHEInfo:
         lines.append(f"Beam A: {self.beamA} @ {self.energyA} GeV")
         lines.append(f"Beam B: {self.beamB} @ {self.energyB} GeV")
         ## Weight groups
-        # weight_groups = self.weight_groups
-        # if weight_groups:
-        #    lines.append("  Weight Groups:")
-        #    for name, count in weight_groups.items():
-        #        lines.append(f"    {name}: {count} weights")
+        if self.weight_groups:
+            lines.append("  Weight Groups:")
+            for name, count in self.weight_groups.items():
+                lines.append(f"    {name}: {count} weights")
         # Number of events
         lines.append(
             f"Number of events: {self.num_events} (negative: {self.negative_weighted_events_ratio:.2%})"
