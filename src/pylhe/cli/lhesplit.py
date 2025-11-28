@@ -59,7 +59,7 @@ def split_lhe_file(
         output_filename = f"{Path(output_base).stem}_{i}{Path(output_base).suffix}"
         new_file = pylhe.LHEFile(init=lhefile.init, events=_generator())
         new_file.tofile(output_filename, rwgt=rwgt, weights=weights)
-        print(f"Wrote {output_filename} with {events_per_file} events.")
+        print(f"Wrote {output_filename} with ~{events_per_file} events.")
 
 
 def main() -> None:

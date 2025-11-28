@@ -91,10 +91,18 @@ def stack_lhe_files(
         lhefiles.append(lhefile)
         init_sections.append(lhefile.init)
 
+        newprocs = []
         # map process IDs to ensure uniqueness
         for proc in lhefile.init.procInfo:
-            proc.procId = map_ids(proc.procId, index, len(input_files))
-        all_proc_info.extend(lhefile.init.procInfo)
+            newproc = pylhe.LHEProcInfo(
+                xSection=proc.xSection,
+                error=proc.error,
+                unitWeight=proc.unitWeight,
+                procId=proc.procId,
+            )
+            newproc.procId = map_ids(proc.procId, index, len(input_files))
+            newprocs.append(newproc)
+        all_proc_info.extend(newprocs)
 
     # Check initialization section consistency
     print("Checking initialization section consistency...")

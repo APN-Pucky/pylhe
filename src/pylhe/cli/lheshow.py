@@ -23,7 +23,7 @@ def show_event(filepath: str, event_number: int) -> None:
     try:
         lhefile = pylhe.LHEFile.fromfile(filepath)
 
-        target_index = event_number - 1
+        target_index = event_number
 
         if target_index < 0:
             print(
@@ -33,14 +33,15 @@ def show_event(filepath: str, event_number: int) -> None:
             sys.exit(1)
 
         # Iterate through events to find the target
-        for i, event in enumerate(lhefile.events):
+        i = 0
+        for i, event in enumerate(lhefile.events, start=1):
             if i == target_index:
                 print(event.tolhe())
                 return
 
         # If we get here, the event number was too high
         print(
-            f"Error: Event {event_number} not found in file. File has {i + 1} events.",
+            f"Error: Event {event_number} not found in file. File has {i} events.",
             file=sys.stderr,
         )
         sys.exit(1)

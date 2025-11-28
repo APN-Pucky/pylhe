@@ -535,14 +535,15 @@ Examples:
     )
 
     sdiff = str(lhefilediff).strip()
+    # APN TODO make better
+    all_good = not sdiff
     if args.format == "json":
         sdiff = json.dumps(lhefilediff, default=lambda o: o.__dict__, indent=2)
     elif args.format == "yaml":
         sdiff = yaml.dump(lhefilediff, default_flow_style=False)
-    else:
-        print(sdiff)
+    print(sdiff)
     # We terminate based on printed string being empty, since that means no differences and events can only be looped once
-    sys.exit(0 if not sdiff else 1)
+    sys.exit(0 if all_good else 1)
 
 
 if __name__ == "__main__":
