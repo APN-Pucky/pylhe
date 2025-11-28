@@ -277,7 +277,7 @@ def diff_lhe_events(
     abs_tol: float,
     rel_tol: float,
 ) -> Iterable[LHEEventDiff]:
-    for j, (event1, event2) in enumerate(zip(events1, events2)):
+    for j, (event1, event2) in enumerate(zip(events1, events2), start=1):
         diffs = {}
         if check_events:
             if event1.eventinfo.nparticles != event2.eventinfo.nparticles:
@@ -329,7 +329,9 @@ def diff_lhe_events(
                 diffs[f"event_{j}_num_particles"] = LHEDiff(
                     old=len(event1.particles), new=len(event2.particles)
                 )
-            for i, (p1, p2) in enumerate(zip(event1.particles, event2.particles)):
+            for i, (p1, p2) in enumerate(
+                zip(event1.particles, event2.particles), start=1
+            ):
                 if p1.id != p2.id:
                     diffs[f"event_{j}_particle_{i}_id"] = LHEDiff(old=p1.id, new=p2.id)
                 if p1.status != p2.status:

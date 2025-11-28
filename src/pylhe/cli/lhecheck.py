@@ -13,6 +13,7 @@ import sys
 import warnings
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Optional
 
 import yaml  # type: ignore[import-untyped]
 
@@ -30,8 +31,6 @@ class LHEMomentum:
 
 @dataclass
 class LHECheckTotalMomentaViolations:
-    event_index: int
-
     incoming: list[LHEMomentum]
     outgoing: list[LHEMomentum]
 
@@ -99,24 +98,21 @@ class LHECheckTotalMomentaViolations:
         rel_diffs = self.rel_differences
 
         lines = []
-        lines.append(f"Event {self.event_index}:")
+        lines.append(f"  {'Metric':<12} {'px':<12} {'py':<12} {'pz':<12} {'E':<12}")
         lines.append(
-            f"  {'Component':<10} {'Incoming':<12} {'Outgoing':<12} {'Abs Diff':<12} {'Rel Diff':<12}"
-        )
-        lines.append(
-            f"  {'-' * 10:<10} {'-' * 12:<12} {'-' * 12:<12} {'-' * 12:<12} {'-' * 12:<12}"
+            f"  {'-' * 12:<12} {'-' * 12:<12} {'-' * 12:<12} {'-' * 12:<12} {'-' * 12:<12}"
         )
 
-        components = [
-            ("px", incoming.px, outgoing.px, diffs.px, rel_diffs.px),
-            ("py", incoming.py, outgoing.py, diffs.py, rel_diffs.py),
-            ("pz", incoming.pz, outgoing.pz, diffs.pz, rel_diffs.pz),
-            ("E", incoming.e, outgoing.e, diffs.e, rel_diffs.e),
+        metrics = [
+            ("Incoming", incoming.px, incoming.py, incoming.pz, incoming.e),
+            ("Outgoing", outgoing.px, outgoing.py, outgoing.pz, outgoing.e),
+            ("Abs Diff", diffs.px, diffs.py, diffs.pz, diffs.e),
+            ("Rel Diff", rel_diffs.px, rel_diffs.py, rel_diffs.pz, rel_diffs.e),
         ]
 
-        for comp, inc_val, out_val, diff_val, rel_diff_val in components:
+        for metric, px_val, py_val, pz_val, e_val in metrics:
             lines.append(
-                f"  {comp:<10} {inc_val:<12.4e} {out_val:<12.4e} {diff_val:<12.4e} {rel_diff_val:<12.4e}"
+                f"  {metric:<12} {px_val:<12.4e} {py_val:<12.4e} {pz_val:<12.4e} {e_val:<12.4e}"
             )
 
         return "\n".join(lines)
@@ -124,9 +120,6 @@ class LHECheckTotalMomentaViolations:
 
 @dataclass
 class LHECheckOnShellViolation:
-    event_index: int
-    particle_index: int
-
     px: float
     py: float
     pz: float
@@ -158,7 +151,7 @@ class LHECheckOnShellViolation:
 
     def __str__(self) -> str:
         lines = []
-        lines.append(f"Event {self.event_index}, Particle {self.particle_index}:")
+        lines.append("✗ On-shell mass violation:")
         lines.append(f"    px:  {self.px:>12.4e}")
         lines.append(f"    py:  {self.py:>12.4e}")
         lines.append(f"    pz:  {self.pz:>12.4e}")
@@ -172,32 +165,61 @@ class LHECheckOnShellViolation:
 
 
 @dataclass
+class LHECheckParticleViolation:
+    particle_index: int
+    on_shell_violations: LHECheckOnShellViolation
+
+    @property
+    def total_violations(self) -> int:
+        return 1
+
+    def __str__(self) -> str:
+        lines = []
+        lines.append(f"✗ Particle {self.particle_index} violations:")
+        lines.append(f"{self.on_shell_violations!s}")
+        return "\n".join(lines)
+
+
+@dataclass
+class LHECheckEventViolation:
+    event_index: int
+    particle_violations: list[LHECheckParticleViolation]
+    total_momentum_violations: Optional[LHECheckTotalMomentaViolations]
+
+    @property
+    def total_violations(self) -> int:
+        count = sum(p.total_violations for p in self.particle_violations)
+        if self.total_momentum_violations is not None:
+            count += 1
+        return count
+
+    def __str__(self) -> str:
+        lines = []
+        lines.append(f"✗ Event {self.event_index} violations:")
+        for pviolation in self.particle_violations:
+            lines.append(f"{pviolation!s}")
+        if self.total_momentum_violations is not None:
+            lines.append(f"{self.total_momentum_violations!s}")
+
+        return "\n".join(lines)
+
+
+@dataclass
 class LHECheck:
     file: str
-    on_shell_violations: list[LHECheckOnShellViolation]
-    total_momentum_violations: list[LHECheckTotalMomentaViolations]
+    check_events: list[LHECheckEventViolation]
+
+    @property
+    def total_violations(self) -> int:
+        return sum(event.total_violations for event in self.check_events)
 
     def __str__(self) -> str:
         lines = []
         lines.append("-" * 60)
         lines.append(f"File: {self.file}")
 
-        num_onshell_violations = len(self.on_shell_violations)
-        num_momentum_violations = len(self.total_momentum_violations)
-
-        if num_onshell_violations == 0 and num_momentum_violations == 0:
-            lines.append("✓ All events pass validation")
-            return "\n".join(lines)
-
-        if num_onshell_violations > 0:
-            lines.append(f"✗ On-shell violations: {num_onshell_violations}")
-            for osviolation in self.on_shell_violations:
-                lines.append(f"  {osviolation!s}")
-
-        if num_momentum_violations > 0:
-            lines.append(f"✗ Total momentum violations: {num_momentum_violations}")
-            for violation in self.total_momentum_violations:
-                lines.append(str(violation))
+        for event in self.check_events:
+            lines.append(str(event))
 
         return "\n".join(lines)
 
@@ -211,15 +233,19 @@ def get_lhecheck(
 ) -> LHECheck:
     # Read LHE file
     lhefile = pylhe.LHEFile.fromfile(filepath)
+
     lhecheck = LHECheck(
-        file=filepath, on_shell_violations=[], total_momentum_violations=[]
+        file=filepath,
+        check_events=[],
     )
 
-    # APN TODO this should be generator yield as well and only evaluate as it prints in case of very large files
     for event_index, event in enumerate(lhefile.events, start=1):
-        particle_index = 0
-        lhe_check_total_momenta = LHECheckTotalMomentaViolations(
+        lhecheck_event = LHECheckEventViolation(
             event_index=event_index,
+            particle_violations=[],
+            total_momentum_violations=None,
+        )
+        lhe_check_total_momenta = LHECheckTotalMomentaViolations(
             incoming=[
                 LHEMomentum(
                     px=particle.px, py=particle.py, pz=particle.pz, e=particle.e
@@ -238,15 +264,12 @@ def get_lhecheck(
         if check_momentum and lhe_check_total_momenta.is_violation(
             absolute_threshold, relative_threshold
         ):
-            lhecheck.total_momentum_violations.append(lhe_check_total_momenta)
+            lhecheck_event.total_momentum_violations = lhe_check_total_momenta
 
         if check_onshell:
-            for particle in event.particles:
-                particle_index += 1
+            for particle_index, particle in enumerate(event.particles, start=1):
                 if particle.status in [-1, 1]:  # Incoming or outgoing particles
                     lhe_check_onshell = LHECheckOnShellViolation(
-                        event_index=event_index,
-                        particle_index=particle_index,
                         px=particle.px,
                         py=particle.py,
                         pz=particle.pz,
@@ -256,7 +279,14 @@ def get_lhecheck(
                     if lhe_check_onshell.is_violation(
                         absolute_threshold, relative_threshold
                     ):
-                        lhecheck.on_shell_violations.append(lhe_check_onshell)
+                        lhecheck_event.particle_violations.append(
+                            LHECheckParticleViolation(
+                                particle_index=particle_index,
+                                on_shell_violations=lhe_check_onshell,
+                            )
+                        )
+        if lhecheck_event.total_violations > 0:
+            lhecheck.check_events.append(lhecheck_event)
 
     return lhecheck
 
@@ -267,10 +297,7 @@ class LHECheckSummary:
 
     @property
     def total_violations(self) -> int:
-        return sum(
-            len(lhecheck.on_shell_violations) + len(lhecheck.total_momentum_violations)
-            for lhecheck in self.files
-        )
+        return sum(lhecheck.total_violations for lhecheck in self.files)
 
     @property
     def total_files(self) -> int:
