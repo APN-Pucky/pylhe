@@ -71,7 +71,7 @@ class LHEInfo:
         # Beam information
         lines.append(f"Beam A: {self.beamA} @ {self.energyA} GeV")
         lines.append(f"Beam B: {self.beamB} @ {self.energyB} GeV")
-        ## Weight groups
+        # Weight groups
         if self.weight_groups:
             lines.append("  Weight Groups:")
             for name, count in self.weight_groups.items():

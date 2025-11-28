@@ -12,6 +12,7 @@ import math
 import sys
 from collections.abc import Iterable
 from dataclasses import dataclass
+from itertools import zip_longest
 from pathlib import Path
 from typing import Any
 
@@ -91,8 +92,8 @@ class LHEInitDiff:
 
 
 def diff_lhe_init(
-    lheii1: pylhe.LHEInit,
-    lheii2: pylhe.LHEInit,
+    lhei1: pylhe.LHEInit,
+    lhei2: pylhe.LHEInit,
     check_init: bool,
     check_weights: bool,
     absolute_tolerance: float,
@@ -104,62 +105,62 @@ def diff_lhe_init(
     Args:
         lheii1: LHEInitInfo from first file
         lheii2: LHEInitInfo from second file
+        check_init: Whether to check initialization section
+        check_weights: Whether to check weight groups and weights
+        absolute_tolerance: Absolute tolerance for numeric comparisons
+        relative_tolerance: Relative tolerance for numeric comparisons
     """
     diffs = {}
     if check_init:
-        if lheii1.initInfo.beamA != lheii2.initInfo.beamA:
-            diffs["beamA"] = LHEDiff(
-                old=lheii1.initInfo.beamA, new=lheii2.initInfo.beamA
-            )
+        if lhei1.initInfo.beamA != lhei2.initInfo.beamA:
+            diffs["beamA"] = LHEDiff(old=lhei1.initInfo.beamA, new=lhei2.initInfo.beamA)
         if not math.isclose(
-            lheii1.initInfo.energyA,
-            lheii2.initInfo.energyA,
+            lhei1.initInfo.energyA,
+            lhei2.initInfo.energyA,
             rel_tol=relative_tolerance,
             abs_tol=absolute_tolerance,
         ):
             diffs["energyA"] = LHEDiff(
-                old=lheii1.initInfo.energyA, new=lheii2.initInfo.energyA
+                old=lhei1.initInfo.energyA, new=lhei2.initInfo.energyA
             )
-        if lheii1.initInfo.beamB != lheii2.initInfo.beamB:
-            diffs["beamB"] = LHEDiff(
-                old=lheii1.initInfo.beamB, new=lheii2.initInfo.beamB
-            )
+        if lhei1.initInfo.beamB != lhei2.initInfo.beamB:
+            diffs["beamB"] = LHEDiff(old=lhei1.initInfo.beamB, new=lhei2.initInfo.beamB)
         if not math.isclose(
-            lheii1.initInfo.energyB,
-            lheii2.initInfo.energyB,
+            lhei1.initInfo.energyB,
+            lhei2.initInfo.energyB,
             rel_tol=relative_tolerance,
             abs_tol=absolute_tolerance,
         ):
             diffs["energyB"] = LHEDiff(
-                old=lheii1.initInfo.energyB, new=lheii2.initInfo.energyB
+                old=lhei1.initInfo.energyB, new=lhei2.initInfo.energyB
             )
-        if lheii1.initInfo.PDFgroupA != lheii2.initInfo.PDFgroupA:
+        if lhei1.initInfo.PDFgroupA != lhei2.initInfo.PDFgroupA:
             diffs["PDFgroupA"] = LHEDiff(
-                old=lheii1.initInfo.PDFgroupA, new=lheii2.initInfo.PDFgroupA
+                old=lhei1.initInfo.PDFgroupA, new=lhei2.initInfo.PDFgroupA
             )
-        if lheii1.initInfo.PDFgroupB != lheii2.initInfo.PDFgroupB:
+        if lhei1.initInfo.PDFgroupB != lhei2.initInfo.PDFgroupB:
             diffs["PDFgroupB"] = LHEDiff(
-                old=lheii1.initInfo.PDFgroupB, new=lheii2.initInfo.PDFgroupB
+                old=lhei1.initInfo.PDFgroupB, new=lhei2.initInfo.PDFgroupB
             )
-        if lheii1.initInfo.PDFsetA != lheii2.initInfo.PDFsetA:
+        if lhei1.initInfo.PDFsetA != lhei2.initInfo.PDFsetA:
             diffs["PDFsetA"] = LHEDiff(
-                old=lheii1.initInfo.PDFsetA, new=lheii2.initInfo.PDFsetA
+                old=lhei1.initInfo.PDFsetA, new=lhei2.initInfo.PDFsetA
             )
-        if lheii1.initInfo.PDFsetB != lheii2.initInfo.PDFsetB:
+        if lhei1.initInfo.PDFsetB != lhei2.initInfo.PDFsetB:
             diffs["PDFsetB"] = LHEDiff(
-                old=lheii1.initInfo.PDFsetB, new=lheii2.initInfo.PDFsetB
+                old=lhei1.initInfo.PDFsetB, new=lhei2.initInfo.PDFsetB
             )
-        if lheii1.initInfo.weightingStrategy != lheii2.initInfo.weightingStrategy:
+        if lhei1.initInfo.weightingStrategy != lhei2.initInfo.weightingStrategy:
             diffs["weightingStrategy"] = LHEDiff(
-                old=lheii1.initInfo.weightingStrategy,
-                new=lheii2.initInfo.weightingStrategy,
+                old=lhei1.initInfo.weightingStrategy,
+                new=lhei2.initInfo.weightingStrategy,
             )
-        if lheii1.initInfo.numProcesses != lheii2.initInfo.numProcesses:
+        if lhei1.initInfo.numProcesses != lhei2.initInfo.numProcesses:
             diffs["numProcesses"] = LHEDiff(
-                old=lheii1.initInfo.numProcesses, new=lheii2.initInfo.numProcesses
+                old=lhei1.initInfo.numProcesses, new=lhei2.initInfo.numProcesses
             )
 
-        for proc1, proc2 in zip(lheii1.procInfo, lheii2.procInfo):
+        for proc1, proc2 in zip(lhei1.procInfo, lhei2.procInfo):
             if not math.isclose(
                 proc1.xSection,
                 proc2.xSection,
@@ -193,12 +194,12 @@ def diff_lhe_init(
                 )
 
         if check_weights:
-            if len(lheii1.weightgroup) != len(lheii2.weightgroup):
+            if len(lhei1.weightgroup) != len(lhei2.weightgroup):
                 diffs["num_weight_groups"] = LHEDiff(
-                    old=len(lheii1.weightgroup), new=len(lheii2.weightgroup)
+                    old=len(lhei1.weightgroup), new=len(lhei2.weightgroup)
                 )
             for (nwg1, wg1), (nwg2, wg2) in zip(
-                lheii1.weightgroup.items(), lheii2.weightgroup.items()
+                lhei1.weightgroup.items(), lhei2.weightgroup.items()
             ):
                 if nwg1 != nwg2:
                     diffs[f"weight_group_key_{nwg1}"] = LHEDiff(old=nwg1, new=nwg2)
@@ -250,8 +251,8 @@ def diff_lhe_init(
                                 f"weight_group_{nwg1}_weight_{n1}_attrib_value_{ak1}"
                             ] = LHEDiff(old=av1, new=av2)
 
-        if lheii1.LHEVersion != lheii2.LHEVersion:
-            diffs["LHEVersion"] = LHEDiff(old=lheii1.LHEVersion, new=lheii2.LHEVersion)
+        if lhei1.LHEVersion != lhei2.LHEVersion:
+            diffs["LHEVersion"] = LHEDiff(old=lhei1.LHEVersion, new=lhei2.LHEVersion)
 
     return LHEInitDiff(diffs=diffs)
 
@@ -277,8 +278,16 @@ def diff_lhe_events(
     abs_tol: float,
     rel_tol: float,
 ) -> Iterable[LHEEventDiff]:
-    for j, (event1, event2) in enumerate(zip(events1, events2), start=1):
+    for j, (event1, event2) in enumerate(zip_longest(events1, events2), start=1):
         diffs = {}
+        if event1 is None:
+            diffs[f"event_{j}"] = LHEDiff(old="missing", new="present")
+            yield LHEEventDiff(event_index=j, diffs=diffs)
+            continue
+        if event2 is None:
+            diffs[f"event_{j}"] = LHEDiff(old="present", new="missing")
+            yield LHEEventDiff(event_index=j, diffs=diffs)
+            continue
         if check_events:
             if event1.eventinfo.nparticles != event2.eventinfo.nparticles:
                 diffs[f"event_{j}_eventinfo_nparticles"] = LHEDiff(
@@ -450,13 +459,6 @@ Examples:
         "--detailed",
         action="store_true",
         help="Perform detailed event-by-event comparison (slower)",
-    )
-
-    parser.add_argument(
-        "-n",
-        "--max-events",
-        type=int,
-        help="Maximum number of events to compare in detailed mode",
     )
 
     parser.add_argument(
