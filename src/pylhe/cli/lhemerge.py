@@ -30,13 +30,7 @@ def check_init_compatibility(init_files: list[pylhe.LHEInit]) -> bool:
 
     reference_init = init_files[0]
 
-    for _, init in enumerate(init_files[1:], 1):
-        # Compare the string representation of the init blocks
-        # This captures all the important physics information
-        if reference_init.tolhe() != init.tolhe():
-            return False
-
-    return True
+    return all(reference_init == init for init in init_files[1:])
 
 
 def merge_lhe_files(

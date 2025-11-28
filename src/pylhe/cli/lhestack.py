@@ -35,7 +35,7 @@ def check_init_consistency(init_files: list[pylhe.LHEInit]) -> bool:
 
     for i, init in enumerate(init_files[1:], 1):
         # Check initInfo compatibility (beam info, etc.)
-        if reference_init.initInfo.tolhe() != init.initInfo.tolhe():
+        if reference_init.initInfo != init.initInfo:
             print(
                 f"Error: File {i + 1} has different beam/run information",
                 file=sys.stderr,

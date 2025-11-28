@@ -84,7 +84,7 @@ class LHEInfo:
         # Process information
         processes = self.process_info
         if processes:
-            for _, proc in enumerate(processes):
+            for proc in processes:
                 lines.append(
                     f"Process {proc.procId} cross-section: ({proc.xSection:.3e} +- {proc.error:.3e}) pb"
                 )
@@ -95,7 +95,7 @@ class LHEInfo:
                     sorted_channels = sorted(
                         channels, key=lambda ch: ch.num_events, reverse=True
                     )
-                    for _, channel in enumerate(sorted_channels):
+                    for channel in sorted_channels:
                         percentage = 100 * channel.num_events / self.num_events
                         lines.append(
                             f"  {channel.incoming_pdgid} -> {channel.outgoing_pdgid}: {channel.num_events:,} events ({percentage:.1f}%)"

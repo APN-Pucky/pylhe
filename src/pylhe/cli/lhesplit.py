@@ -28,7 +28,8 @@ def split_lhe_file(
         input_file: Path to the input LHE file
         output_base: Base name for output files including .lhe or .lhe.gz extension
         num_files: Number of output files to create
-        preserve_weights: Whether to preserve event weights in output
+        rwgt: Whether to use rwgt section if present in the input file
+        weights: Whether to preserve event weights in output
     """
     # Read the LHE file
     try:

@@ -18,12 +18,11 @@ def show_event(filepath: str, event_number: int) -> None:
 
     Args:
         filepath: Path to the LHE file
-        event_number: Event number to display (1-indexed)
+        event_number: Event number to display (0-indexed)
     """
     try:
         lhefile = pylhe.LHEFile.fromfile(filepath)
 
-        # Convert to 0-indexed for iteration
         target_index = event_number
 
         if target_index < 0:
@@ -89,7 +88,7 @@ Examples:
 
     group = parser.add_mutually_exclusive_group(required=True)
     group.add_argument(
-        "--event", type=int, metavar="N", help="Show the Nth event (1-indexed)"
+        "--event", type=int, metavar="N", help="Show the Nth event (0-indexed)"
     )
     group.add_argument("--init", action="store_true", help="Show the init block")
 

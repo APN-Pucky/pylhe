@@ -281,7 +281,7 @@ def diff_lhe_events(
         diffs = {}
         if check_events:
             if event1.eventinfo.nparticles != event2.eventinfo.nparticles:
-                diffs["event_{j}_eventinfo_nparticles"] = LHEDiff(
+                diffs[f"event_{j}_eventinfo_nparticles"] = LHEDiff(
                     old=event1.eventinfo.nparticles, new=event2.eventinfo.nparticles
                 )
             if event1.eventinfo.pid != event2.eventinfo.pid:
@@ -374,7 +374,7 @@ def diff_lhe_events(
                     )
 
         if diffs:
-            yield LHEEventDiff(event_index=i, diffs=diffs)
+            yield LHEEventDiff(event_index=j, diffs=diffs)
 
 
 @dataclass
@@ -407,8 +407,6 @@ def diff_lhe_files(
     Args:
         file1: Path to first LHE file
         file2: Path to second LHE file
-        detailed: Whether to perform detailed event-by-event comparison
-        max_events: Maximum number of events to compare in detail
         abs_tol: Absolute tolerance for numeric comparisons
         rel_tol: Relative tolerance for numeric comparisons
     """

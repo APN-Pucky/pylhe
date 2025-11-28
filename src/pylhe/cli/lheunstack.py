@@ -28,7 +28,7 @@ def lhe_unstack(lhefile_path: str) -> list[pylhe.LHEFile]:
                 if event.eventinfo.pid == target_proc_id:
                     yield event
 
-        neiwinit = pylhe.LHEInit(
+        newinit = pylhe.LHEInit(
             lhe_init.initInfo,
             [proc_info],
             lhe_init.weightgroup,
@@ -36,7 +36,7 @@ def lhe_unstack(lhefile_path: str) -> list[pylhe.LHEFile]:
         )
         # Create new LHE file with filtered events
         newlhef = pylhe.LHEFile(
-            init=neiwinit, events=_events_for_process(proc_info.procId)
+            init=newinit, events=_events_for_process(proc_info.procId)
         )
         result_files.append(newlhef)
 
