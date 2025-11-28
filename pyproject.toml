@@ -92,6 +92,7 @@ lhesplit = "pylhe.cli.lhesplit:main"
 lhemerge = "pylhe.cli.lhemerge:main"
 lhestack = "pylhe.cli.lhestack:main"
 lheunstack = "pylhe.cli.lheunstack:main"
+lhe2lhe = "pylhe.cli.lhe2lhe:main"
 
 [tool.hatch.version]
 source = "vcs"
