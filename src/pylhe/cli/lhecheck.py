@@ -13,7 +13,7 @@ import sys
 import warnings
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Optional
+from typing import Optional, TextIO, Union
 
 import yaml  # type: ignore[import-untyped]
 
@@ -225,17 +225,22 @@ class LHECheck:
 
 
 def get_lhecheck(
-    filepath: str,
+    filepath_or_fileobj: Union[str, TextIO],
     absolute_threshold: float,
     relative_threshold: float,
     check_momentum: bool = True,
     check_onshell: bool = True,
 ) -> LHECheck:
     # Read LHE file
-    lhefile = pylhe.LHEFile.fromfile(filepath)
+    if isinstance(filepath_or_fileobj, str):
+        lhefile = pylhe.LHEFile.fromfile(filepath_or_fileobj)
+        file_display_name = filepath_or_fileobj
+    else:
+        lhefile = pylhe.LHEFile.frombuffer(filepath_or_fileobj)
+        file_display_name = "<stdin>"
 
     lhecheck = LHECheck(
-        file=filepath,
+        file=file_display_name,
         check_events=[],
     )
 
@@ -317,16 +322,16 @@ class LHECheckSummary:
 
 
 def get_lhechecksummary(
-    filepaths: list[str],
+    filepaths_or_fileobjs: list[Union[str, TextIO]],
     absolute_threshold: float,
     relative_threshold: float,
     check_momentum: bool = True,
     check_onshell: bool = True,
 ) -> LHECheckSummary:
     lhechecks = []
-    for filepath in filepaths:
+    for filepath_or_fileobj in filepaths_or_fileobjs:
         lhecheck = get_lhecheck(
-            filepath,
+            filepath_or_fileobj,
             absolute_threshold,
             relative_threshold,
             check_momentum,
@@ -361,6 +366,7 @@ def main() -> None:
         epilog="""
 Examples:
   lhecheck file.lhe                        # Check with default thresholds (1e-6)
+  cat file.lhe | lhecheck                   # Read from stdin
   lhecheck file.lhe -a 1e-8                # Check with higher absolute precision
   lhecheck file.lhe -r 1e-8                # Check with higher relative precision
   lhecheck *.lhe -v                        # Check multiple files with verbose output
@@ -369,10 +375,15 @@ Examples:
   lhecheck file.lhe --no-momentum          # Skip momentum conservation checks
   lhecheck file.lhe --no-onshell           # Skip on-shell mass checks
   lhecheck file.lhe -a 1e-10 -r 1e-8 -v    # Custom thresholds with verbose output
+  cat file.lhe | lhecheck -v --format=json  # Read from stdin with verbose JSON output
         """,
     )
 
-    parser.add_argument("files", nargs="+", help="LHE file(s) to validate")
+    parser.add_argument(
+        "files",
+        nargs="*",
+        help="LHE file(s) to validate (or read from stdin if not provided)",
+    )
     parser.add_argument(
         "-a",
         "--absolute",
@@ -420,24 +431,34 @@ Examples:
         print("Error: Relative threshold must be positive", file=sys.stderr)
         sys.exit(1)
 
-    # Expand file paths
-    file_paths = []
-    for pattern in args.files:
-        path = Path(pattern)
-        if path.exists():
-            if path.is_file():
-                file_paths.append(str(path))
-            else:
-                warnings.warn(f"{pattern} is not a file", UserWarning, stacklevel=2)
-        else:
-            warnings.warn(f"{pattern} not found", UserWarning, stacklevel=2)
+    # Check if reading from stdin
+    use_stdin = not args.files and not sys.stdin.isatty()
 
-    if not file_paths:
-        print("Error: No valid files found", file=sys.stderr)
-        sys.exit(1)
+    file_inputs: list[Union[str, TextIO]] = []
+    if use_stdin:
+        # Read from stdin
+        if args.verbose:
+            print("Reading LHE data from stdin...", file=sys.stderr)
+
+        file_inputs += [sys.stdin]
+    else:
+        # Expand file paths
+        for pattern in args.files:
+            path = Path(pattern)
+            if path.exists():
+                if path.is_file():
+                    file_inputs.append(str(path))
+                else:
+                    warnings.warn(f"{pattern} is not a file", UserWarning, stacklevel=2)
+            else:
+                warnings.warn(f"{pattern} not found", UserWarning, stacklevel=2)
+
+        if not file_inputs:
+            print("Error: No valid files found and no stdin data", file=sys.stderr)
+            sys.exit(1)
 
     lhecheck_summary = get_lhechecksummary(
-        file_paths,
+        file_inputs,
         args.absolute,
         args.relative,
         check_momentum=not args.no_momentum,

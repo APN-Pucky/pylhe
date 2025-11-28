@@ -13,6 +13,7 @@ import warnings
 from collections import Counter
 from dataclasses import dataclass
 from pathlib import Path
+from typing import TextIO, Union
 
 import yaml  # type: ignore[import-untyped]
 
@@ -103,9 +104,14 @@ class LHEInfo:
         return "\n".join(lines)
 
 
-def get_lheinfo(filepath: str) -> LHEInfo:
+def get_lheinfo(filepath_or_fileobj: Union[str, TextIO]) -> LHEInfo:
     # Read LHE file
-    lhefile = pylhe.LHEFile.fromfile(filepath)
+    if isinstance(filepath_or_fileobj, str):
+        lhefile = pylhe.LHEFile.fromfile(filepath_or_fileobj)
+        file_display_name = filepath_or_fileobj
+    else:
+        lhefile = pylhe.LHEFile.frombuffer(filepath_or_fileobj)
+        file_display_name = "<stdin>"
     init_info = lhefile.init.initInfo
 
     initial_final_combinations: Counter[
@@ -138,7 +144,7 @@ def get_lheinfo(filepath: str) -> LHEInfo:
         initial_final_combinations[combination] += 1
 
     return LHEInfo(
-        filepath=filepath,
+        filepath=file_display_name,
         beamA=init_info.beamA,
         energyA=init_info.energyA,
         beamB=init_info.beamB,
@@ -213,11 +219,13 @@ class LHESummary:
         return "\n".join(lines)
 
 
-def get_lhesummary(file_paths: list[str]) -> LHESummary:
+def get_lhesummary(
+    filepaths_or_fileobjs: list[Union[str, TextIO]],
+) -> LHESummary:
     lheinfos = []
     # Analyze all files
-    for filepath in file_paths:
-        lheinfo = get_lheinfo(filepath)
+    for filepath_or_fileobj in filepaths_or_fileobjs:
+        lheinfo = get_lheinfo(filepath_or_fileobj)
         lheinfos.append(lheinfo)
 
     return LHESummary(files=lheinfos)
@@ -231,13 +239,18 @@ def main() -> None:
         epilog="""
 Examples:
   lheinfo file.lhe                      # Analyze single file (plain format)
+  cat file.lhe | lheinfo                # Read from stdin
   lheinfo *.lhe                         # Analyze multiple files
   lheinfo file1.lhe --format=json       # Output results in JSON format
   lheinfo file1.lhe --format=yaml       # Output results in YAML format
         """,
     )
 
-    parser.add_argument("files", nargs="+", help="LHE file(s) to analyze")
+    parser.add_argument(
+        "files",
+        nargs="*",
+        help="LHE file(s) to analyze (or read from stdin if not provided)",
+    )
 
     parser.add_argument(
         "--format",
@@ -248,20 +261,27 @@ Examples:
 
     args = parser.parse_args()
 
-    # Expand file paths
-    file_paths = []
-    for pattern in args.files:
-        path = Path(pattern)
-        if path.exists():
-            if path.is_file():
-                file_paths.append(str(path))
-            else:
-                warnings.warn(f"{pattern} is not a file", UserWarning, stacklevel=2)
-    if not file_paths:
-        print("Error: No valid files found", file=sys.stderr)
-        sys.exit(1)
+    # Check if reading from stdin
+    use_stdin = not args.files and not sys.stdin.isatty()
 
-    summary = get_lhesummary(file_paths)
+    file_inputs: list[Union[str, TextIO]] = []
+    if use_stdin:
+        # Read from stdin
+        file_inputs += [sys.stdin]
+    else:
+        # Expand file paths
+        for pattern in args.files:
+            path = Path(pattern)
+            if path.exists():
+                if path.is_file():
+                    file_inputs.append(str(path))
+                else:
+                    warnings.warn(f"{pattern} is not a file", UserWarning, stacklevel=2)
+        if not file_inputs:
+            print("Error: No valid files found and no stdin data", file=sys.stderr)
+            sys.exit(1)
+
+    summary = get_lhesummary(file_inputs)
     if args.format == "json":
         print(
             json.dumps(

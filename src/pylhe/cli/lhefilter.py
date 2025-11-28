@@ -67,16 +67,16 @@ def matches_particle_filter(
 
 def matches_event_filter(
     event_index: int,
-    include_events: Optional[set[int]],
-    exclude_events: Optional[set[int]],
+    include_event_ranges: Optional[set[int]],
+    exclude_event_ranges: Optional[set[int]],
 ) -> bool:
     """Check if event matches event number filters."""
     # event_index is 0-based, but user input is 1-based
     event_number = event_index + 1
 
-    if include_events is not None and event_number not in include_events:
+    if include_event_ranges is not None and event_number not in include_event_ranges:
         return False
-    if exclude_events is not None and event_number in exclude_events:
+    if exclude_event_ranges is not None and event_number in exclude_event_ranges:
         return False
     return True
 
@@ -92,8 +92,8 @@ def filter_lhe_file(
     exclude_incoming_pdgids: Optional[set[int]] = None,
     outgoing_pdgids: Optional[set[int]] = None,
     exclude_outgoing_pdgids: Optional[set[int]] = None,
-    include_events: Optional[set[int]] = None,
-    exclude_events: Optional[set[int]] = None,
+    include_event_ranges: Optional[set[int]] = None,
+    exclude_event_ranges: Optional[set[int]] = None,
 ) -> None:
     """Filter an LHE file based on the given criteria."""
     try:
@@ -114,7 +114,7 @@ def filter_lhe_file(
                         exclude_outgoing_pdgids,
                     )
                     and matches_event_filter(
-                        event_index, include_events, exclude_events
+                        event_index, include_event_ranges, exclude_event_ranges
                     )
                 ):
                     yield event
@@ -146,6 +146,54 @@ def parse_int_list(value: str) -> set[int]:
         raise argparse.ArgumentTypeError(err) from e
 
 
+def parse_range_list(value: str) -> set[int]:
+    """Parse comma-separated list of integers and ranges.
+
+    Supports:
+    - Individual numbers: 5
+    - Ranges: 5-10 (inclusive)
+    - Lower bound: 5- (from 5 to end)
+    - Upper bound: -10 (from start to 10)
+    - Mixed: 1,5-10,15-,20,-25
+    """
+    result = set()
+
+    try:
+        for vitem in value.split(","):
+            item = vitem.strip()
+
+            if "-" not in item:
+                # Single number
+                result.add(int(item))
+            elif item.startswith("-"):
+                # Upper bound: -N
+                upper = int(item[1:])
+                result.update(range(1, upper + 1))
+            elif item.endswith("-"):
+                # Lower bound: N-
+                lower = int(item[:-1])
+                # Use a reasonable upper limit for open ranges
+                result.update(range(lower, 1000000))
+            else:
+                # Range: N-M
+                parts = item.split("-")
+                if len(parts) == 2:
+                    lower, upper = int(parts[0]), int(parts[1])
+                    if lower > upper:
+                        err = f"Invalid range: {item} (start > end)"
+                        raise ValueError(err)
+                    result.update(range(lower, upper + 1))
+                else:
+                    err = f"Invalid range format: {item}"
+                    raise ValueError(err)
+
+    except ValueError as e:
+        err = f"Invalid range specification: {value} ({e})"
+        raise argparse.ArgumentTypeError(err) from e
+
+    return result
+
+
 def main() -> None:
     """Main CLI function."""
     parser = argparse.ArgumentParser(
@@ -155,9 +203,11 @@ def main() -> None:
 Examples:
   lhefilter input.lhe -o filtered.lhe --process-p 81,82
   lhefilter input.lhe --PROCESS 91 --incoming 21 --outgoing 11,-11
-  lhefilter input.lhe --event 1,5,10 --outgoing 13,-13
-  lhefilter input.lhe --EVENT 7 --incoming 2,-2
+  lhefilter input.lhe --events 1,5,10 --outgoing 13,-13
+  lhefilter input.lhe --EVENTS 7 --incoming 2,-2
   lhefilter input.lhe.gz --out 6,-6 | gzip > filtered.lhe.gz
+  lhefilter input.lhe --events 10-20 --outgoing 11,-11
+  lhefilter input.lhe --events 50- --EVENTS 55-60
 
 Process ID filters:
   --process-p ID[,ID...]    Include only events with these process IDs
@@ -169,9 +219,11 @@ Particle PDG ID filters:
   --outgoing/-out ID[,ID...] Include events containing these outgoing particles
   --OUTGOING/-OUT ID[,ID...] Exclude events containing these outgoing particles
 
-Event number filters:
-  --event N[,N...]          Include only these event numbers (1-indexed)
-  --EVENT N[,N...]          Exclude these event numbers (1-indexed)
+Event filters:
+  --events RANGE[,RANGE...] Include events in these ranges (1-indexed)
+                            Supports: N (single), N-M (range), N- (from N), -M (up to M)
+  --EVENTS RANGE[,RANGE...] Exclude events in these ranges (1-indexed)
+                            Supports: N (single), N-M (range), N- (from N), -M (up to M)
 
 Note: Multiple filters are combined with AND logic.
       PDG ID 0 can be used as wildcard for any particle.
@@ -228,18 +280,18 @@ Note: Multiple filters are combined with AND logic.
         help="Exclude events containing these outgoing particles",
     )
 
-    # Event number filters
+    # Event range filters
     parser.add_argument(
-        "--event",
-        type=parse_int_list,
-        metavar="N[,N...]",
-        help="Include only these event numbers (1-indexed)",
+        "--events",
+        type=parse_range_list,
+        metavar="RANGE[,RANGE...]",
+        help="Include events in these ranges (1-indexed). Supports: N (single), N-M (range), N- (from N), -M (up to M)",
     )
     parser.add_argument(
-        "--EVENT",
-        type=parse_int_list,
-        metavar="N[,N...]",
-        help="Exclude these event numbers (1-indexed)",
+        "--EVENTS",
+        type=parse_range_list,
+        metavar="RANGE[,RANGE...]",
+        help="Exclude events in these ranges (1-indexed). Supports: N (single), N-M (range), N- (from N), -M (up to M)",
     )
 
     parser.add_argument(
@@ -274,8 +326,8 @@ Note: Multiple filters are combined with AND logic.
         exclude_incoming_pdgids=args.INCOMING,
         outgoing_pdgids=args.outgoing,
         exclude_outgoing_pdgids=args.OUTGOING,
-        include_events=args.event,
-        exclude_events=args.EVENT,
+        include_event_ranges=args.events,
+        exclude_event_ranges=args.EVENTS,
     )
 
 
