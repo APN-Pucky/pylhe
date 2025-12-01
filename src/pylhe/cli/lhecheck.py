@@ -6,6 +6,8 @@ This tool validates that LHE files can be loaded properly and checks
 momentum conservation for each event up to a specified precision.
 """
 
+# APN TODO this should also check mother daughter momentum conservations
+
 import argparse
 import json
 import math
