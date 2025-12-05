@@ -13,14 +13,73 @@ import json
 import math
 import sys
 import warnings
+from collections.abc import Iterable
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Optional, TextIO, Union
+from typing import Any, Optional, TextIO, Union
 
 import yaml  # type: ignore[import-untyped]
+from typing_extensions import Self
 
 import pylhe
 from pylhe.cli.util import dataclass_with_properties_to_dict
+
+
+@dataclass
+class LHECheckAccumulatedSummary:
+    total_files_checked: int
+    total_events_with_violations: int
+    total_positive_mass_violations: int
+    total_onshell_violations: int
+    total_total_momentum_violations: int
+
+    @property
+    def total_violations(self) -> int:
+        return (
+            self.total_positive_mass_violations
+            + self.total_onshell_violations
+            + self.total_total_momentum_violations
+        )
+
+    def __add__(
+        self, other: "LHECheckAccumulatedSummary"
+    ) -> "LHECheckAccumulatedSummary":
+        return LHECheckAccumulatedSummary(
+            total_files_checked=self.total_files_checked + other.total_files_checked,
+            total_events_with_violations=self.total_events_with_violations
+            + other.total_events_with_violations,
+            total_positive_mass_violations=self.total_positive_mass_violations
+            + other.total_positive_mass_violations,
+            total_onshell_violations=self.total_onshell_violations
+            + other.total_onshell_violations,
+            total_total_momentum_violations=self.total_total_momentum_violations
+            + other.total_total_momentum_violations,
+        )
+
+    def __iadd__(self, other: "LHECheckAccumulatedSummary") -> Self:
+        self.total_files_checked += other.total_files_checked
+        self.total_events_with_violations += other.total_events_with_violations
+        self.total_positive_mass_violations += other.total_positive_mass_violations
+        self.total_onshell_violations += other.total_onshell_violations
+        self.total_total_momentum_violations += other.total_total_momentum_violations
+        return self
+
+    def print(self, *args: Any, **kwargs: Any) -> None:
+        strings = []
+        strings.append(f"Total files checked: {self.total_files_checked}")
+        strings.append(
+            f"Total events with violations: {self.total_events_with_violations}"
+        )
+        strings.append(f"Total violations: {self.total_violations}")
+        strings.append(
+            f"  Positive mass violations: {self.total_positive_mass_violations}"
+        )
+        strings.append(f"  On-shell mass violations: {self.total_onshell_violations}")
+        strings.append(
+            f"  Total momentum violations: {self.total_total_momentum_violations}"
+        )
+
+        print("\n".join(strings), *args, **kwargs)
 
 
 @dataclass
@@ -93,7 +152,7 @@ class LHECheckTotalMomentaViolations:
             or not (diffs.e < absolute_threshold or rel_diffs.e < relative_threshold)
         )
 
-    def __str__(self) -> str:
+    def print(self, *args: Any, **kwargs: Any) -> LHECheckAccumulatedSummary:
         incoming = self.total_incoming
         outgoing = self.total_outgoing
         diffs = self.differences
@@ -116,8 +175,14 @@ class LHECheckTotalMomentaViolations:
             lines.append(
                 f"  {metric:<12} {px_val:<12.4e} {py_val:<12.4e} {pz_val:<12.4e} {e_val:<12.4e}"
             )
-
-        return "\n".join(lines)
+        print("\n".join(lines), *args, **kwargs)
+        return LHECheckAccumulatedSummary(
+            total_files_checked=0,
+            total_events_with_violations=0,
+            total_positive_mass_violations=0,
+            total_onshell_violations=0,
+            total_total_momentum_violations=1,
+        )
 
 
 @dataclass
@@ -151,7 +216,7 @@ class LHECheckOnShellViolation:
             or self.rel_difference < relative_threshold
         )
 
-    def __str__(self) -> str:
+    def print(self, *args: Any, **kwargs: Any) -> LHECheckAccumulatedSummary:
         lines = []
         lines.append("✗ On-shell mass violation:")
         lines.append(f"    px:  {self.px:>12.4e}")
@@ -163,7 +228,14 @@ class LHECheckOnShellViolation:
         lines.append(
             f"    ||p| - |m||: {self.difference:.4e} (rel: {self.rel_difference:.4e})"
         )
-        return "\n".join(lines)
+        print("\n".join(lines), *args, **kwargs)
+        return LHECheckAccumulatedSummary(
+            total_files_checked=0,
+            total_events_with_violations=0,
+            total_positive_mass_violations=0,
+            total_onshell_violations=1,
+            total_total_momentum_violations=0,
+        )
 
 
 @dataclass
@@ -188,7 +260,7 @@ class LHECheckPositiveMassViolation:
     def is_violation(self) -> bool:
         return self.p2 > self.e2
 
-    def __str__(self) -> str:
+    def print(self, *args: Any, **kwargs: Any) -> LHECheckAccumulatedSummary:
         lines = []
         lines.append("✗ Positive mass violation:")
         lines.append(f"    px:  {self.px:>12.4e}")
@@ -198,7 +270,14 @@ class LHECheckPositiveMassViolation:
         lines.append(f"    p²:  {self.p2:>12.4e}")
         lines.append(f"    e²:  {self.e2:>12.4e}")
         lines.append(f"    m²:  {self.m2:>12.4e} (negative - unphysical)")
-        return "\n".join(lines)
+        print("\n".join(lines), *args, **kwargs)
+        return LHECheckAccumulatedSummary(
+            total_files_checked=0,
+            total_events_with_violations=0,
+            total_positive_mass_violations=1,
+            total_onshell_violations=0,
+            total_total_momentum_violations=0,
+        )
 
 
 @dataclass
@@ -214,12 +293,20 @@ class LHECheckParticleViolation:
             for v in [self.on_shell_violations, self.positive_mass_violation]
         )
 
-    def __str__(self) -> str:
-        lines = []
-        lines.append(f"✗ Particle {self.particle_index} violations:")
-        lines.append(f"{self.on_shell_violations!s}")
-        lines.append(f"{self.positive_mass_violation!s}")
-        return "\n".join(lines)
+    def print(self, *args: Any, **kwargs: Any) -> LHECheckAccumulatedSummary:
+        ret = LHECheckAccumulatedSummary(
+            total_files_checked=0,
+            total_events_with_violations=0,
+            total_positive_mass_violations=0,
+            total_onshell_violations=0,
+            total_total_momentum_violations=0,
+        )
+        print(f"✗ Particle {self.particle_index} violations:", *args, **kwargs)
+        if self.on_shell_violations is not None:
+            ret += self.on_shell_violations.print(*args, **kwargs)
+        if self.positive_mass_violation is not None:
+            ret += self.positive_mass_violation.print(*args, **kwargs)
+        return ret
 
 
 @dataclass
@@ -235,35 +322,40 @@ class LHECheckEventViolation:
             count += 1
         return count
 
-    def __str__(self) -> str:
-        lines = []
-        lines.append(f"✗ Event {self.event_index} violations:")
+    def print(self, *args: object, **kwargs: object) -> LHECheckAccumulatedSummary:
+        ret = LHECheckAccumulatedSummary(
+            total_files_checked=0,
+            total_events_with_violations=0,
+            total_positive_mass_violations=0,
+            total_onshell_violations=0,
+            total_total_momentum_violations=0,
+        )
+        print(f"✗ Event {self.event_index} violations:")
         for pviolation in self.particle_violations:
-            lines.append(f"{pviolation!s}")
+            ret += pviolation.print(*args, **kwargs)
         if self.total_momentum_violations is not None:
-            lines.append(f"{self.total_momentum_violations!s}")
-
-        return "\n".join(lines)
+            ret += self.total_momentum_violations.print(*args, **kwargs)
+        return ret
 
 
 @dataclass
 class LHECheck:
     file: str
-    check_events: list[LHECheckEventViolation]
+    check_events: Iterable[LHECheckEventViolation]
 
-    @property
-    def total_violations(self) -> int:
-        return sum(event.total_violations for event in self.check_events)
-
-    def __str__(self) -> str:
-        lines = []
-        lines.append("-" * 60)
-        lines.append(f"File: {self.file}")
-
+    def print(self, *args: Any, **kwargs: Any) -> LHECheckAccumulatedSummary:
+        ret = LHECheckAccumulatedSummary(
+            total_events_with_violations=0,
+            total_positive_mass_violations=0,
+            total_onshell_violations=0,
+            total_total_momentum_violations=0,
+            total_files_checked=1,
+        )
+        print("-" * 60, *args, **kwargs)
+        print(f"File: {self.file}", *args, **kwargs)
         for event in self.check_events:
-            lines.append(str(event))
-
-        return "\n".join(lines)
+            ret += event.print(*args, **kwargs)
+        return ret
 
 
 def get_lhecheck(
@@ -282,96 +374,87 @@ def get_lhecheck(
         lhefile = pylhe.LHEFile.frombuffer(filepath_or_fileobj)
         file_display_name = "<stdin>"
 
-    lhecheck = LHECheck(
-        file=file_display_name,
-        check_events=[],
-    )
-
-    for event_index, event in enumerate(lhefile.events, start=1):
-        lhecheck_event = LHECheckEventViolation(
-            event_index=event_index,
-            particle_violations=[],
-            total_momentum_violations=None,
-        )
-        lhe_check_total_momenta = LHECheckTotalMomentaViolations(
-            incoming=[
-                LHEMomentum(
-                    px=particle.px, py=particle.py, pz=particle.pz, e=particle.e
-                )
-                for particle in event.particles
-                if particle.status == -1
-            ],  # Incoming
-            outgoing=[
-                LHEMomentum(
-                    px=particle.px, py=particle.py, pz=particle.pz, e=particle.e
-                )
-                for particle in event.particles
-                if particle.status == 1
-            ],  # Outgoing
-        )
-        if check_momentum and lhe_check_total_momenta.is_violation(
-            absolute_threshold, relative_threshold
-        ):
-            lhecheck_event.total_momentum_violations = lhe_check_total_momenta
-
-        for particle_index, particle in enumerate(event.particles, start=1):
-            lhe_particle_check = LHECheckParticleViolation(
-                particle_index=particle_index,
-                on_shell_violations=None,
-                positive_mass_violation=None,
+    def _generator() -> Iterable[LHECheckEventViolation]:
+        for event_index, event in enumerate(lhefile.events, start=1):
+            lhecheck_event = LHECheckEventViolation(
+                event_index=event_index,
+                particle_violations=[],
+                total_momentum_violations=None,
             )
-            if check_mass:
-                lhe_check_mass = LHECheckPositiveMassViolation(
-                    px=particle.px, py=particle.py, pz=particle.pz, e=particle.e
-                )
-                if lhe_check_mass.is_violation():
-                    lhe_particle_check.positive_mass_violation = lhe_check_mass
-            if check_onshell and particle.status in [
-                -1,
-                1,
-            ]:  # Incoming or outgoing particles
-                lhe_check_onshell = LHECheckOnShellViolation(
-                    px=particle.px,
-                    py=particle.py,
-                    pz=particle.pz,
-                    e=particle.e,
-                    m=particle.m,
-                )
-                if lhe_check_onshell.is_violation(
-                    absolute_threshold, relative_threshold
-                ):
-                    lhe_particle_check.on_shell_violations = lhe_check_onshell
-            if lhe_particle_check.total_violations > 0:
-                lhecheck_event.particle_violations.append(lhe_particle_check)
-        if lhecheck_event.total_violations > 0:
-            lhecheck.check_events.append(lhecheck_event)
+            lhe_check_total_momenta = LHECheckTotalMomentaViolations(
+                incoming=[
+                    LHEMomentum(
+                        px=particle.px, py=particle.py, pz=particle.pz, e=particle.e
+                    )
+                    for particle in event.particles
+                    if particle.status == -1
+                ],  # Incoming
+                outgoing=[
+                    LHEMomentum(
+                        px=particle.px, py=particle.py, pz=particle.pz, e=particle.e
+                    )
+                    for particle in event.particles
+                    if particle.status == 1
+                ],  # Outgoing
+            )
+            if check_momentum and lhe_check_total_momenta.is_violation(
+                absolute_threshold, relative_threshold
+            ):
+                lhecheck_event.total_momentum_violations = lhe_check_total_momenta
 
-    return lhecheck
+            for particle_index, particle in enumerate(event.particles, start=1):
+                lhe_particle_check = LHECheckParticleViolation(
+                    particle_index=particle_index,
+                    on_shell_violations=None,
+                    positive_mass_violation=None,
+                )
+                if check_mass:
+                    lhe_check_mass = LHECheckPositiveMassViolation(
+                        px=particle.px, py=particle.py, pz=particle.pz, e=particle.e
+                    )
+                    if lhe_check_mass.is_violation():
+                        lhe_particle_check.positive_mass_violation = lhe_check_mass
+                if check_onshell and particle.status in [
+                    -1,
+                    1,
+                ]:  # Incoming or outgoing particles
+                    lhe_check_onshell = LHECheckOnShellViolation(
+                        px=particle.px,
+                        py=particle.py,
+                        pz=particle.pz,
+                        e=particle.e,
+                        m=particle.m,
+                    )
+                    if lhe_check_onshell.is_violation(
+                        absolute_threshold, relative_threshold
+                    ):
+                        lhe_particle_check.on_shell_violations = lhe_check_onshell
+                if lhe_particle_check.total_violations > 0:
+                    lhecheck_event.particle_violations.append(lhe_particle_check)
+            if lhecheck_event.total_violations > 0:
+                yield lhecheck_event
+
+    return LHECheck(
+        file=file_display_name,
+        check_events=_generator(),
+    )
 
 
 @dataclass
 class LHECheckSummary:
     files: list[LHECheck]
 
-    @property
-    def total_violations(self) -> int:
-        return sum(lhecheck.total_violations for lhecheck in self.files)
-
-    @property
-    def total_files(self) -> int:
-        return len(self.files)
-
-    def __str__(self) -> str:
-        lines = []
+    def print(self, *args: Any, **kwargs: Any) -> LHECheckAccumulatedSummary:
+        ret = LHECheckAccumulatedSummary(
+            total_files_checked=0,
+            total_events_with_violations=0,
+            total_positive_mass_violations=0,
+            total_onshell_violations=0,
+            total_total_momentum_violations=0,
+        )
         for lhecheck in self.files:
-            lines.append(str(lhecheck))
-        lines.append("=" * 60)
-
-        lines.append(f"Files processed: {self.total_files}")
-        lines.append(f"Total violations: {self.total_violations:,}")
-        lines.append("=" * 60)
-
-        return "\n".join(lines)
+            ret += lhecheck.print(*args, **kwargs)
+        return ret
 
 
 def get_lhechecksummary(
@@ -526,10 +609,12 @@ Examples:
         check_mass=not args.no_mass,
         check_onshell=not args.no_onshell,
     )
-    print_lhecheck_summary(lhecheck_summary, format=args.format)
+    lheas = lhecheck_summary.print()
+    print("=" * 60)
+    lheas.print()
 
     # Exit with appropriate code
-    sys.exit(0 if lhecheck_summary.total_violations == 0 else 1)
+    sys.exit(0 if lheas.total_violations == 0 else 1)
 
 
 if __name__ == "__main__":

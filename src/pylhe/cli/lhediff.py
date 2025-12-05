@@ -7,8 +7,10 @@ in their initialization sections, event counts, and optionally event contents.
 """
 
 import argparse
-import json
 import math
+
+# We do not want a Python Exception on broken pipe, which happens when piping to 'head' or 'less'
+import signal
 import sys
 from collections.abc import Iterable
 from dataclasses import dataclass
@@ -16,9 +18,11 @@ from itertools import zip_longest
 from pathlib import Path
 from typing import Any
 
-import yaml  # type: ignore[import-untyped]
+from typing_extensions import Self
 
 import pylhe
+
+signal.signal(signal.SIGPIPE, signal.SIG_DFL)
 
 
 def diff_lhe_event_infos(
@@ -71,11 +75,33 @@ def diff_lhe_particles(
 
 
 @dataclass
+class LHEAccumulatedDiff:
+    ndiff: int
+
+    def __add__(self, other: "LHEAccumulatedDiff") -> "LHEAccumulatedDiff":
+        """Add two LHEAccumulatedDiff objects together."""
+        return LHEAccumulatedDiff(ndiff=self.ndiff + other.ndiff)
+
+    def __iadd__(self, other: "LHEAccumulatedDiff") -> Self:
+        """In-place addition for LHEAccumulatedDiff objects."""
+        self.ndiff += other.ndiff
+        return self
+
+    def print(self, *args: Any, **kwargs: Any) -> None:
+        """Print the number of differences."""
+        print(f"Total differences: {self.ndiff}", *args, **kwargs)
+
+
+@dataclass
 class LHEDiff:
     """Generic dataclass to store differences between old and new values."""
 
     old: Any
     new: Any
+
+    def print(self, *args: Any, **kwargs: Any) -> LHEAccumulatedDiff:
+        print(f"{self.old} -> {self.new}", *args, **kwargs)
+        return LHEAccumulatedDiff(ndiff=1)
 
 
 @dataclass
@@ -84,11 +110,12 @@ class LHEInitDiff:
 
     diffs: dict[str, LHEDiff]
 
-    def __str__(self) -> str:
-        diff_strings = []
+    def print(self, *args: Any, end: str = "\n", **kwargs: Any) -> LHEAccumulatedDiff:
+        lhead = LHEAccumulatedDiff(ndiff=0)
         for key, diff in self.diffs.items():
-            diff_strings.append(f"{key}: {diff.old} -> {diff.new}")
-        return "\n".join(diff_strings)
+            print(f"{key}: ", *args, end="", **kwargs)
+            lhead += diff.print(*args, end=end, **kwargs)
+        return lhead
 
 
 def diff_lhe_init(
@@ -264,11 +291,12 @@ class LHEEventDiff:
     event_index: int
     diffs: dict[str, LHEDiff]
 
-    def __str__(self) -> str:
-        diff_strings = []
+    def print(self, *args: Any, end: str = "\n", **kwargs: Any) -> LHEAccumulatedDiff:
+        lhead = LHEAccumulatedDiff(ndiff=0)
         for key, diff in self.diffs.items():
-            diff_strings.append(f"{key}: {diff.old} -> {diff.new}")
-        return "\n".join(diff_strings)
+            print(f"{key}: ", *args, end="", **kwargs)
+            lhead += diff.print(*args, end=end, **kwargs)
+        return lhead
 
 
 def diff_lhe_events(
@@ -395,12 +423,12 @@ class LHEFileDiff:
     lheinitdiff: LHEInitDiff
     lheeventdiffs: Iterable[LHEEventDiff]
 
-    def __str__(self) -> str:
-        diff_strings = []
-        diff_strings.append(str(self.lheinitdiff))
+    def print(self, *args: Any, **kwargs: Any) -> LHEAccumulatedDiff:
+        ret = LHEAccumulatedDiff(ndiff=0)
+        ret += self.lheinitdiff.print(*args, **kwargs)
         for event_diff in self.lheeventdiffs:
-            diff_strings.append(str(event_diff))
-        return "\n".join(diff_strings)
+            ret += event_diff.print(*args, **kwargs)
+        return ret
 
 
 def diff_lhe_files(
@@ -456,12 +484,6 @@ Examples:
     parser.add_argument("file2", help="Second LHE file to compare")
 
     parser.add_argument(
-        "--detailed",
-        action="store_true",
-        help="Perform detailed event-by-event comparison (slower)",
-    )
-
-    parser.add_argument(
         "--abs-tol",
         "-a",
         type=float,
@@ -493,15 +515,6 @@ Examples:
         help="Don't compare events (default: False)",
     )
 
-    # format plain, json or yaml
-    parser.add_argument(
-        "--format",
-        "-f",
-        choices=["plain", "json", "yaml"],
-        default="plain",
-        help="Output format for the diff (default: plain)",
-    )
-
     parser.add_argument(
         "--no-weights",
         "-nw",
@@ -522,9 +535,6 @@ Examples:
             print(f"Error: '{file_path}' is not a file", file=sys.stderr)
             sys.exit(1)
 
-    if args.max_events and not args.detailed:
-        print("Warning: --max-events has no effect without --detailed", file=sys.stderr)
-
     # Compare the files
     lhefilediff = diff_lhe_files(
         args.file1,
@@ -536,16 +546,14 @@ Examples:
         rel_tol=args.rel_tol,
     )
 
-    sdiff = str(lhefilediff).strip()
-    # APN TODO make better
-    all_good = not sdiff
-    if args.format == "json":
-        sdiff = json.dumps(lhefilediff, default=lambda o: o.__dict__, indent=2)
-    elif args.format == "yaml":
-        sdiff = yaml.dump(lhefilediff, default_flow_style=False)
-    print(sdiff)
+    lhead = lhefilediff.print()
+
+    if lhead.ndiff != 0:
+        print("=" * 60)
+        lhead.print()
+
     # We terminate based on printed string being empty, since that means no differences and events can only be looped once
-    sys.exit(0 if all_good else 1)
+    sys.exit(0 if lhead.ndiff == 0 else 1)
 
 
 if __name__ == "__main__":
