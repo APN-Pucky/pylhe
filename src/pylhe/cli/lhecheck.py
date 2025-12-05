@@ -22,6 +22,33 @@ from typing_extensions import Self
 import pylhe
 
 
+def positive_float(value: str) -> float:
+    """Custom argparse type for positive floats."""
+    try:
+        fvalue = float(value)
+    except ValueError:
+        err = f"Invalid float value: '{value}'"
+        raise argparse.ArgumentTypeError(err) from None
+
+    if fvalue <= 0:
+        err = f"Value must be positive, got: {fvalue}"
+        raise argparse.ArgumentTypeError(err)
+
+    return fvalue
+
+
+@dataclass
+class LHECheckArgs:
+    positive_mass: bool
+    positive_mass_abs: float
+    onshell: bool
+    onshell_rel: float
+    onshell_abs: float
+    total_momentum: bool
+    total_momentum_rel: float
+    total_momentum_abs: float
+
+
 @dataclass
 class LHECheckAccumulatedSummary:
     total_files_checked: int
@@ -254,8 +281,8 @@ class LHECheckPositiveMassViolation:
     def m2(self) -> float:
         return self.e2 - self.p2
 
-    def is_violation(self) -> bool:
-        return self.p2 > self.e2
+    def is_violation(self, absolute_threshold: float) -> bool:
+        return self.p2 - self.e2 > absolute_threshold**2
 
     def print(self, *args: Any, **kwargs: Any) -> LHECheckAccumulatedSummary:
         lines = []
@@ -280,6 +307,7 @@ class LHECheckPositiveMassViolation:
 @dataclass
 class LHECheckParticleViolation:
     particle_index: int
+    particle_pdgid: int
     on_shell_violations: Optional[LHECheckOnShellViolation]
     positive_mass_violation: Optional[LHECheckPositiveMassViolation]
 
@@ -298,7 +326,11 @@ class LHECheckParticleViolation:
             total_onshell_violations=0,
             total_total_momentum_violations=0,
         )
-        print(f"✗ Particle {self.particle_index} violations:", *args, **kwargs)
+        print(
+            f"✗ Particle {self.particle_index} (id={self.particle_pdgid}) violations:",
+            *args,
+            **kwargs,
+        )
         if self.on_shell_violations is not None:
             ret += self.on_shell_violations.print(*args, **kwargs)
         if self.positive_mass_violation is not None:
@@ -348,20 +380,19 @@ class LHECheck:
             total_total_momentum_violations=0,
             total_files_checked=1,
         )
-        print("-" * 60, *args, **kwargs)
-        print(f"File: {self.file}", *args, **kwargs)
+        printed_header = False
         for event in self.check_events:
+            if not printed_header:
+                print("-" * 60, *args, **kwargs)
+                print(f"File: {self.file}", *args, **kwargs)
+                printed_header = True
             ret += event.print(*args, **kwargs)
         return ret
 
 
 def get_lhecheck(
     filepath_or_fileobj: Union[str, TextIO],
-    absolute_threshold: float,
-    relative_threshold: float,
-    check_momentum: bool,
-    check_mass: bool,
-    check_onshell: bool,
+    lhecargs: LHECheckArgs,
 ) -> LHECheck:
     # Read LHE file
     if isinstance(filepath_or_fileobj, str):
@@ -394,24 +425,25 @@ def get_lhecheck(
                     if particle.status == 1
                 ],  # Outgoing
             )
-            if check_momentum and lhe_check_total_momenta.is_violation(
-                absolute_threshold, relative_threshold
+            if lhecargs.total_momentum and lhe_check_total_momenta.is_violation(
+                lhecargs.total_momentum_abs, lhecargs.total_momentum_rel
             ):
                 lhecheck_event.total_momentum_violations = lhe_check_total_momenta
 
             for particle_index, particle in enumerate(event.particles, start=1):
                 lhe_particle_check = LHECheckParticleViolation(
                     particle_index=particle_index,
+                    particle_pdgid=particle.id,
                     on_shell_violations=None,
                     positive_mass_violation=None,
                 )
-                if check_mass:
+                if lhecargs.positive_mass:
                     lhe_check_mass = LHECheckPositiveMassViolation(
                         px=particle.px, py=particle.py, pz=particle.pz, e=particle.e
                     )
-                    if lhe_check_mass.is_violation():
+                    if lhe_check_mass.is_violation(lhecargs.positive_mass_abs):
                         lhe_particle_check.positive_mass_violation = lhe_check_mass
-                if check_onshell and particle.status in [
+                if lhecargs.onshell and particle.status in [
                     -1,
                     1,
                 ]:  # Incoming or outgoing particles
@@ -423,7 +455,7 @@ def get_lhecheck(
                         m=particle.m,
                     )
                     if lhe_check_onshell.is_violation(
-                        absolute_threshold, relative_threshold
+                        lhecargs.onshell_abs, lhecargs.onshell_rel
                     ):
                         lhe_particle_check.on_shell_violations = lhe_check_onshell
                 if lhe_particle_check.total_violations > 0:
@@ -456,22 +488,11 @@ class LHECheckSummary:
 
 def get_lhechecksummary(
     filepaths_or_fileobjs: list[Union[str, TextIO]],
-    absolute_threshold: float,
-    relative_threshold: float,
-    check_momentum: bool,
-    check_mass: bool,
-    check_onshell: bool,
+    lhecargs: LHECheckArgs,
 ) -> LHECheckSummary:
     lhechecks = []
     for filepath_or_fileobj in filepaths_or_fileobjs:
-        lhecheck = get_lhecheck(
-            filepath_or_fileobj,
-            absolute_threshold,
-            relative_threshold,
-            check_momentum,
-            check_mass,
-            check_onshell,
-        )
+        lhecheck = get_lhecheck(filepath_or_fileobj, lhecargs)
         lhechecks.append(lhecheck)
     return LHECheckSummary(files=lhechecks)
 
@@ -485,9 +506,6 @@ def main() -> None:
 Examples:
   lhecheck file.lhe                        # Check with default thresholds (1e-6)
   cat file.lhe | lhecheck                   # Read from stdin
-  lhecheck file.lhe -a 1e-8                # Check with higher absolute precision
-  lhecheck file.lhe -r 1e-8                # Check with higher relative precision
-  lhecheck *.lhe -v                        # Check multiple files with verbose output
   lhecheck file.lhe --no-momentum          # Skip momentum conservation checks
   lhecheck file.lhe --no-onshell           # Skip on-shell mass checks
   lhecheck file.lhe -a 1e-10 -r 1e-8 -v    # Custom thresholds with verbose output
@@ -500,46 +518,56 @@ Examples:
         nargs="*",
         help="LHE file(s) to validate (or read from stdin if not provided)",
     )
+
     parser.add_argument(
-        "-a",
-        "--absolute",
-        type=float,
-        default=1e-6,
-        help="Absolute threshold for momentum conservation (default: 1e-6)",
-    )
-    parser.add_argument(
-        "-r",
-        "--relative",
-        type=float,
-        default=1e-6,
-        help="Relative threshold for momentum conservation (default: 1e-6)",
-    )
-    parser.add_argument(
-        "--no-momentum",
+        "--no-total-momentum",
         action="store_true",
         help="Skip total momentum conservation checks",
     )
+    parser.add_argument(
+        "--total-momentum-rel",
+        type=positive_float,
+        default=1e-6,
+        help="Relative threshold for total momentum conservation (default: 1e-6)",
+    )
+    parser.add_argument(
+        "--total-momentum-abs",
+        type=positive_float,
+        default=1e-6,
+        help="Absolute threshold for total momentum conservation (default: 1e-6)",
+    )
+
     parser.add_argument(
         "--no-onshell",
         action="store_true",
         help="Skip on-shell mass checks",
     )
+    parser.add_argument(
+        "--onshell-rel",
+        type=positive_float,
+        default=1e-6,
+        help="Relative threshold for on-shell mass checks (default: 1e-6)",
+    )
+    parser.add_argument(
+        "--onshell-abs",
+        type=positive_float,
+        default=1e-6,
+        help="Absolute threshold for on-shell mass checks (default: 1e-6)",
+    )
 
     parser.add_argument(
-        "--no-mass",
+        "--no-positive-mass",
         action="store_true",
         help="Skip positive mass checks",
     )
+    parser.add_argument(
+        "--positive-mass-abs",
+        type=positive_float,
+        default=1e-6,
+        help="Absolute threshold for positive mass checks (default: 1e-6)",
+    )
 
     args = parser.parse_args()
-
-    # Validate threshold arguments
-    if args.absolute <= 0:
-        print("Error: Absolute threshold must be positive", file=sys.stderr)
-        sys.exit(1)
-    if args.relative <= 0:
-        print("Error: Relative threshold must be positive", file=sys.stderr)
-        sys.exit(1)
 
     # Check if reading from stdin
     use_stdin = not args.files and not sys.stdin.isatty()
@@ -547,9 +575,6 @@ Examples:
     file_inputs: list[Union[str, TextIO]] = []
     if use_stdin:
         # Read from stdin
-        if args.verbose:
-            print("Reading LHE data from stdin...", file=sys.stderr)
-
         file_inputs += [sys.stdin]
     else:
         # Expand file paths
@@ -567,17 +592,22 @@ Examples:
             print("Error: No valid files found and no stdin data", file=sys.stderr)
             sys.exit(1)
 
-    lhecheck_summary = get_lhechecksummary(
-        file_inputs,
-        args.absolute,
-        args.relative,
-        check_momentum=not args.no_momentum,
-        check_mass=not args.no_mass,
-        check_onshell=not args.no_onshell,
+    lhecargs = LHECheckArgs(
+        positive_mass=not args.no_positive_mass,
+        positive_mass_abs=args.positive_mass_abs,
+        onshell=not args.no_onshell,
+        onshell_rel=args.onshell_rel,
+        onshell_abs=args.onshell_abs,
+        total_momentum=not args.no_total_momentum,
+        total_momentum_rel=args.total_momentum_rel,
+        total_momentum_abs=args.total_momentum_abs,
     )
+
+    lhecheck_summary = get_lhechecksummary(file_inputs, lhecargs)
     lheas = lhecheck_summary.print()
-    print("=" * 60)
-    lheas.print()
+    if lheas.total_violations != 0:
+        print("=" * 60)
+        lheas.print()
 
     # Exit with appropriate code
     sys.exit(0 if lheas.total_violations == 0 else 1)
