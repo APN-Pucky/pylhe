@@ -117,7 +117,10 @@ def filter_lhe_file(
     """Filter an LHE file based on the given criteria."""
     try:
         # Read the input LHE file
-        lhefile = pylhe.LHEFile.fromfile(input_file)
+        if input_file == "-":
+            lhefile = pylhe.LHEFile.frombuffer(sys.stdin)
+        else:
+            lhefile = pylhe.LHEFile.fromfile(input_file)
 
         # Filter events
         def _generator() -> Iterable[pylhe.LHEEvent]:
@@ -149,10 +152,14 @@ def filter_lhe_file(
             filtered_lhefile.write(sys.stdout, rwgt=rwgt, weights=weights)
 
     except FileNotFoundError:
-        print(f"Error: File '{input_file}' not found", file=sys.stderr)
+        if input_file == "-":
+            print("Error: Unable to read from stdin", file=sys.stderr)
+        else:
+            print(f"Error: File '{input_file}' not found", file=sys.stderr)
         sys.exit(1)
     except Exception as e:
-        print(f"Error processing file '{input_file}': {e}", file=sys.stderr)
+        source = "stdin" if input_file == "-" else f"file '{input_file}'"
+        print(f"Error processing {source}: {e}", file=sys.stderr)
         sys.exit(1)
 
 
@@ -229,6 +236,8 @@ Examples:
   lhefilter input.lhe.gz --out 6,-6 | gzip > filtered.lhe.gz
   lhefilter input.lhe --events 10-20 --outgoing 11,-11
   lhefilter input.lhe --events 50- --EVENTS 55-60
+  cat input.lhe | lhefilter --outgoing 11,-11
+  zcat input.lhe.gz | lhefilter --process-p 81 --outgoing 13,-13
 
 Process ID filters:
   --process-p ID[,ID...]    Include only events with these process IDs
@@ -252,7 +261,9 @@ Note: Multiple filters are combined with AND logic.
         """,
     )
 
-    parser.add_argument("input", help="Input LHE file")
+    parser.add_argument(
+        "input", nargs="?", default="-", help="Input LHE file (default: stdin)"
+    )
     parser.add_argument("-o", "--output", help="Output file (default: write to stdout)")
 
     # Process ID filters
@@ -330,11 +341,12 @@ Note: Multiple filters are combined with AND logic.
 
     args = parser.parse_args()
 
-    # Validate input file
-    input_path = Path(args.input)
-    if not input_path.exists():
-        print(f"Error: Input file '{args.input}' does not exist", file=sys.stderr)
-        sys.exit(1)
+    # Validate input file (skip validation for stdin)
+    if args.input != "-":
+        input_path = Path(args.input)
+        if not input_path.exists():
+            print(f"Error: Input file '{args.input}' does not exist", file=sys.stderr)
+            sys.exit(1)
 
     # Call the filtering function
     filter_lhe_file(

@@ -9,7 +9,6 @@ momentum conservation for each event up to a specified precision.
 # APN TODO this should also check mother daughter momentum conservations
 
 import argparse
-import json
 import math
 import sys
 import warnings
@@ -18,11 +17,9 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Optional, TextIO, Union
 
-import yaml  # type: ignore[import-untyped]
 from typing_extensions import Self
 
 import pylhe
-from pylhe.cli.util import dataclass_with_properties_to_dict
 
 
 @dataclass
@@ -479,23 +476,6 @@ def get_lhechecksummary(
     return LHECheckSummary(files=lhechecks)
 
 
-def print_lhecheck_summary(
-    lhecheck_summary: LHECheckSummary, format: str = "plain"
-) -> None:
-    """Print LHE check summary in the specified format."""
-    if format == "json":
-        print(json.dumps(dataclass_with_properties_to_dict(lhecheck_summary), indent=2))
-    elif format == "yaml":
-        print(
-            yaml.dump(
-                dataclass_with_properties_to_dict(lhecheck_summary),
-                default_flow_style=False,
-            )
-        )
-    else:
-        print(str(lhecheck_summary))
-
-
 def main() -> None:
     """Main CLI function."""
     parser = argparse.ArgumentParser(
@@ -508,12 +488,10 @@ Examples:
   lhecheck file.lhe -a 1e-8                # Check with higher absolute precision
   lhecheck file.lhe -r 1e-8                # Check with higher relative precision
   lhecheck *.lhe -v                        # Check multiple files with verbose output
-  lhecheck file.lhe --format=json          # Output results in JSON format
-  lhecheck file.lhe --format=yaml          # Output results in YAML format
   lhecheck file.lhe --no-momentum          # Skip momentum conservation checks
   lhecheck file.lhe --no-onshell           # Skip on-shell mass checks
   lhecheck file.lhe -a 1e-10 -r 1e-8 -v    # Custom thresholds with verbose output
-  cat file.lhe | lhecheck -v --format=json  # Read from stdin with verbose JSON output
+  cat file.lhe | lhecheck -v               # Read from stdin with verbose JSON output
         """,
     )
 
@@ -535,18 +513,6 @@ Examples:
         type=float,
         default=1e-6,
         help="Relative threshold for momentum conservation (default: 1e-6)",
-    )
-    parser.add_argument(
-        "-v",
-        "--verbose",
-        action="store_true",
-        help="Print detailed information during validation",
-    )
-    parser.add_argument(
-        "--format",
-        choices=["plain", "json", "yaml"],
-        default="plain",
-        help="Output format (default: plain)",
     )
     parser.add_argument(
         "--no-momentum",

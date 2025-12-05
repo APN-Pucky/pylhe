@@ -8,8 +8,6 @@ in their initialization sections, event counts, and optionally event contents.
 
 import argparse
 import math
-
-# We do not want a Python Exception on broken pipe, which happens when piping to 'head' or 'less'
 import signal
 import sys
 from collections.abc import Iterable
@@ -22,6 +20,7 @@ from typing_extensions import Self
 
 import pylhe
 
+# We do not want a Python Exception on broken pipe, which happens when piping to 'head' or 'less'
 signal.signal(signal.SIGPIPE, signal.SIG_DFL)
 
 
