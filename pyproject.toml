@@ -84,6 +84,17 @@ Homepage = "https://github.com/scikit-hep/pylhe"
 "Issue Tracker" = "https://github.com/scikit-hep/pylhe/issues"
 "Releases" = "https://github.com/scikit-hep/pylhe/releases"
 
+[project.scripts]
+lhecheck = "pylhe.cli.lhecheck:main"
+lhefilter = "pylhe.cli.lhefilter:main"
+lheinfo = "pylhe.cli.lheinfo:main"
+lheshow = "pylhe.cli.lheshow:main"
+lhesplit = "pylhe.cli.lhesplit:main"
+lhemerge = "pylhe.cli.lhemerge:main"
+lhestack = "pylhe.cli.lhestack:main"
+lheunstack = "pylhe.cli.lheunstack:main"
+lhe2lhe = "pylhe.cli.lhe2lhe:main"
+
 [tool.hatch.version]
 source = "vcs"
 
